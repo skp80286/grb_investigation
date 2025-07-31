@@ -4,7 +4,8 @@ import numpy as np
 from matplotlib import rcParams
 from scipy.interpolate import CubicSpline
 
-def plot_lightcurve(title, csv_filename, x_col, y_col, error_col, frequency_col='Frequency Band', fit_spline=False):
+def plot_lightcurve(title, csv_filename, x_col, y_col, error_col, frequency_col='Frequency Band', 
+fit_spline=False, invert_y=False, selected_bands=None, yscale='linear', xscale='log'):
     """
     Create a professional publication-quality light curve plot from CSV data.
     
@@ -151,6 +152,7 @@ def plot_lightcurve(title, csv_filename, x_col, y_col, error_col, frequency_col=
     
     # Plot each frequency band with different colors
     for i, (freq, band_data) in enumerate(frequency_bands.items()):
+        if selected_bands is not None and freq not in selected_bands: continue
         if len(band_data) > 0:
             # Extract x and y values
             x_vals = [item['x'] for item in band_data]
@@ -210,10 +212,11 @@ def plot_lightcurve(title, csv_filename, x_col, y_col, error_col, frequency_col=
     ax.set_title('GRB 250704B', fontsize=16, fontweight='bold', pad=20)
     
     # Set x-axis to log scale for better visualization of GRB data
-    ax.set_xscale('log')
+    ax.set_xscale(xscale)
+    ax.set_yscale(yscale)
     
     # Invert y-axis (high values at bottom, low values at top)
-    ax.invert_yaxis()
+    if invert_y: ax.invert_yaxis()
     
     # Customize ticks
     ax.tick_params(which='major', length=8, width=1.2, direction='in')
