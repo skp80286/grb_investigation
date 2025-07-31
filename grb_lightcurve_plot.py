@@ -125,9 +125,26 @@ def plot_lightcurve(title, csv_filename, x_col, y_col, error_col, frequency_col=
     for freq in frequency_bands:
         frequency_bands[freq].sort(key=lambda x: x['x'])
     
-    # Define a professional color palette
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
-              '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+    # Define rainbow colors for frequency bands (red to violet)
+    # Order: J (maroon) -> z (dark red) -> r/R (red) -> v/V (green) -> b (blue) -> u (violet)
+    rainbow_colors = {
+        'J': '#8B0000',      # Dark Red/Maroon
+        'z': '#B22222',      # Fire Brick (deeper red)
+        'r': '#FF0000',      # Red
+        'R': '#FF0000',      # Red (alternative)
+        'r\'': '#FF0000',    # Red (alternative)
+        'v': '#00FF00',      # Green
+        'V': '#00FF00',      # Green (alternative)
+        'b': '#0000FF',      # Blue
+        'u': '#8000FF',      # Violet
+        'i': '#FF00FF',      # Magenta (for i-band)
+        'i\'': '#FF00FF',    # Magenta (for i-band alternative)
+        'g': '#00FFFF',      # Cyan (for g-band)
+    }
+    
+    # Fallback colors for any other frequency bands
+    fallback_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+                       '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
     
     # Create the figure with professional styling
     fig, ax = plt.subplots(figsize=(12, 8))
@@ -139,8 +156,13 @@ def plot_lightcurve(title, csv_filename, x_col, y_col, error_col, frequency_col=
             x_vals = [item['x'] for item in band_data]
             y_vals = [item['y'] for item in band_data]
             
-            # Get color for this band
-            color = colors[i % len(colors)]
+            # Get color for this band based on frequency
+            if freq in rainbow_colors:
+                color = rainbow_colors[freq]
+            else:
+                # Use fallback color for unknown frequency bands
+                color = fallback_colors[i % len(fallback_colors)]
+                print(f"Warning: Unknown frequency band '{freq}', using fallback color")
             
             # Plot the line
             ax.plot(x_vals, y_vals, marker='o', markersize=6, linewidth=2, 
@@ -213,9 +235,9 @@ def plot_lightcurve(title, csv_filename, x_col, y_col, error_col, frequency_col=
     plt.tight_layout()
     
     # Save the plot
-    output_filename = csv_filename.replace('.csv', '_lightcurve.png')
+    output_filename = csv_filename.replace('.csv', '_lightcurve.pdf').replace('data/', 'plots/')
     plt.savefig(output_filename, dpi=300, bbox_inches='tight', 
-                facecolor='white', edgecolor='none')
+                facecolor='white', edgecolor='none', format='pdf')
     
     # Show the plot
     plt.show()
