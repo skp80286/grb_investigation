@@ -3,9 +3,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import rcParams
 from scipy.interpolate import CubicSpline
+from scipy.optimize import curve_fit
 
 def plot_lightcurve(title, csv_filename, x_col, y_col, error_col, frequency_col='Frequency Band', 
-fit_spline=False, invert_y=False, selected_bands=None, yscale='linear', xscale='log'):
+fit_spline=False, fit_2phase_powerlaw=False, breakout_time=None, invert_y=False, selected_bands=None, yscale='linear', xscale='log'):
     """
     Create a professional publication-quality light curve plot from CSV data.
     
@@ -25,6 +26,10 @@ fit_spline=False, invert_y=False, selected_bands=None, yscale='linear', xscale='
         Name of the column containing frequency band information (default: 'Frequency Band')
     fit_spline : bool, optional
         Whether to fit and display cubic splines for each frequency band (default: False)
+    fit_2phase_powerlaw : bool, optional
+        Whether to fit and display a 2-phase power law for each frequency band (default: False)
+    breakout_time : float, optional
+        The time (in same units as x_col) at which to break the power law fit (default: None)
     """
     
     # Set up professional styling for research publication
@@ -191,6 +196,46 @@ fit_spline=False, invert_y=False, selected_bands=None, yscale='linear', xscale='
                 except Exception as e:
                     print(f"Warning: Could not fit spline for frequency band '{freq}': {e}")
             
+            # Fit and plot 2-phase power law if requested
+            if fit_2phase_powerlaw and breakout_time is not None and len(x_vals) >= 4:
+                try:
+                    x_arr = np.array(x_vals)
+                    y_arr = np.array(y_vals)
+                    # Only fit if there are enough points on both sides
+                    mask1 = x_arr < breakout_time
+                    mask2 = x_arr >= breakout_time
+                    if np.sum(mask1) >= 2 and np.sum(mask2) >= 2:
+                        # Power law: y = A * x^alpha, fit in log-log space
+                        def powerlaw(x, A, alpha):
+                            return A * x**alpha
+                        # Before breakout
+                        x1 = x_arr[mask1]
+                        y1 = y_arr[mask1]
+                        popt1, _ = curve_fit(powerlaw, x1, y1, maxfev=10000)
+                        A1, alpha1 = popt1
+                        x1_fit = np.logspace(np.log10(min(x1)), np.log10(max(x1)), 50)
+                        y1_fit = powerlaw(x1_fit, A1, alpha1)
+                        ax.plot(x1_fit, y1_fit, ':', color=color, linewidth=2, alpha=0.8, label=f'{freq} Powerlaw 1')
+                        # After breakout
+                        x2 = x_arr[mask2]
+                        y2 = y_arr[mask2]
+                        popt2, _ = curve_fit(powerlaw, x2, y2, maxfev=10000)
+                        A2, alpha2 = popt2
+                        x2_fit = np.logspace(np.log10(min(x2)), np.log10(max(x2)), 50)
+                        y2_fit = powerlaw(x2_fit, A2, alpha2)
+                        ax.plot(x2_fit, y2_fit, '-.', color=color, linewidth=2, alpha=0.8, label=f'{freq} Powerlaw 2')
+                        # Annotate alpha values in the middle of each segment
+                        # For alpha1: middle of [min(x1), breakout_time]
+                        x1_mid = 10**((3*np.log10(min(x1)) + np.log10(breakout_time)) / 4)
+                        y1_mid = powerlaw(np.log10(breakout_time), A1, alpha1)
+                        ax.annotate(f"α₁={alpha1:.2f}", xy=(x1_mid, y1_mid), xytext=(0, 10), textcoords='offset points', color=color, fontsize=11, fontweight='bold', ha='center')
+                        # For alpha2: middle of [breakout_time, max(x2)]
+                        x2_mid = 10**((np.log10(breakout_time) + 3*np.log10(max(x2))) / 4)
+                        y2_mid = powerlaw(np.log10(breakout_time), A2, alpha2)
+                        ax.annotate(f"α₂={alpha2:.2f}", xy=(x2_mid, y2_mid), xytext=(0, 10), textcoords='offset points', color=color, fontsize=11, fontweight='bold', ha='center')
+                except Exception as e:
+                    print(f"Warning: Could not fit 2-phase power law for frequency band '{freq}': {e}")
+            
             # Add error bars if available
             error_vals = []
             error_x_vals = []
@@ -231,8 +276,9 @@ fit_spline=False, invert_y=False, selected_bands=None, yscale='linear', xscale='
     ax.grid(True, which='minor', linestyle=':', alpha=0.2)
     
     # Add legend
-    ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True, 
-              fontsize=11, bbox_to_anchor=(1.02, 1))
+    #ax.legend(loc='best', frameon=True, fancybox=True, shadow=True, 
+    #          fontsize=11, bbox_to_anchor=(1.02, 1))
+    ax.legend(fontsize=11, loc='lower left')
     
     # Adjust layout
     plt.tight_layout()
@@ -267,5 +313,7 @@ if __name__ == "__main__":
         y_col='Magnitude (AB)',
         error_col='Error bar (Mag)',
         frequency_col='Frequency Band',
-        fit_spline=True  # Set to True to show cubic spline fits
+        fit_spline=True,  # Set to True to show cubic spline fits
+        fit_2phase_powerlaw=True, # Set to True to show 2-phase power law fits
+        breakout_time=1000 # Example breakout time
     ) 
