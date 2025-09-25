@@ -15,7 +15,7 @@
 #   <obsdir>/output/jetsimpy_plot_.log
 #
 # Example:
-#   python jetsimpy_plot.py --obsfile GRB250916A/GRB250916A_cons.csv  \
+#   python jetsimpy_plot.py --obsfile data/GRB250916A_cons.csv  \
 # --params '{jetType: tophat, e0: 4.87e52, epsb: 0.0448, epse: 0.3981, \
 # n0: 0.0032, thc: 0.0623, thv: 0.0014, p: 2.3578, lf: 100, A: 0, s: 0, z: 2.011}'
 
@@ -134,7 +134,7 @@ filt_freqs={'i':393170436721311.5, 'z':328215960148894.2,
     'SAO-R':45562310000000, 'X-ray(10keV)': 2.42e+18, 'X-ray(1keV)': 2.42e+17,
     'radio(1.3GHz)': 1.3e9, 'radio(6GHz)': 6e9, 'radio(10GHz)': 1e10, 'radio(15GHz)': 1.5e10}
 
-def lc_plot( params, observed_data):
+def lc_plot(basedir, params, observed_data):
 
     # Time and Frequencies
     ta = 1.0e4
@@ -296,7 +296,7 @@ def main():
     params['s']=0
     params['z']=args.redshift
     """
-    lc_plot(args.params, observed_data=args.obsfile)
+    lc_plot(basedir, args.params, observed_data=args.obsfile)
     """
     params = {}
     params['jetType']=args.jetType
