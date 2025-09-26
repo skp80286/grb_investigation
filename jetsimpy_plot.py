@@ -82,7 +82,8 @@ def model(obs_time, obs_nu, params):
     )
 
     jetProfile = None
-    #logger.info(f"Creating jet {P} {jet_P}")
+    #logging.info(f"Creating jet {P} {jet_P}")
+    #logging.info(f"P={P}\njet_P={jet_P}")
     if params['jetType'] == 'gaussian': 
         jetProfile = jetsimpy.Gaussian(
                 jet_P["theta_c"], jet_P["Eiso"], lf0=jet_P["lf"]
@@ -121,9 +122,9 @@ def model(obs_time, obs_nu, params):
             max_iter=100,
             force_return=True,
         )
-        #print(f'model_flux={model_flux}')
+        #logging.info(f'model_flux={model_flux}')
     except Exception as e:
-        logging.info(f"obs_time={obs_time}")
+        #logging.info(f"obs_time={obs_time}")
         raise
     return model_flux
 
@@ -230,7 +231,7 @@ def lc_plot(basedir, params, observed_data):
 def main():
     SAMPLE_USAGE = (
         "Example:\n"
-        "  python jetsimpy_plot.py --obsfile GRB250916A/GRB250916A_cons.csv  "
+        "  python jetsimpy_plot.py --obsfile data/GRB250916A_cons.csv  "
         " --params '{jetType: tophat, e0: 4.87e52, epsb: 0.0448, epse: 0.3981, "
         " n0: 0.0032, thc: 0.0623, thv: 0.0014, p: 2.3578, lf: 100, A: 0, s: 0, z: 2.011}'\n"
     )

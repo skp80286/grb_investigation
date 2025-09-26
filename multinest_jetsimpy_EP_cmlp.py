@@ -25,7 +25,7 @@ import logging
 import argparse
 import requests
 
-import jetsimpy_plot
+from jetsimpy_plot import model, lc_plot
 
 #### telegram:
 tele_token = os.environ["Tele_GITbot_Token"]
@@ -39,21 +39,6 @@ def Tele_alert(tele_token, chat_id, message):
         print("Error in sending message : " + str(e))
 
 ######################
-
-
-def log_prior(cube, ndim, nparams):
-    for i, name in enumerate(param_names):
-        if name == 'thc' or name == 'thv':
-            pmin = priors_uniform[name]["low"]
-            pmax = priors_uniform[name]["high"]
-            cube[i] = np.arccos(np.cos(pmin) - cube[i] * (np.cos(pmin) - np.cos(pmax)))
-        else:
-            pmin = priors_uniform[name]["low"]
-            pmax = priors_uniform[name]["high"]
-            cube[i] = pmin + (pmax - pmin) * cube[i]  # scale [0,1] to [min,max]
-
-
-################################################
 
 def log_prior(cube, ndim, nparams):
     for i, name in enumerate(param_names):
@@ -77,6 +62,7 @@ def log_likelihood(cube, ndim, nparams):
         if priors_uniform[name]["low"] == priors_uniform[name]["high"]:
             params[name] = priors_uniform[name]["low"]
     params['jetType'] = args.jetType
+    params['z'] = args.redshift
 
     #if params["thv"]/params["thc"] > 1.5:
         #return -np.inf
@@ -119,7 +105,7 @@ np.random.seed(12)
 file = args.obsfile
 
 # Set up the output directory and logging
-basedir =  f"{os.path.dirname(file)}/multinest_{args.label}"
+basedir =  f"output/multinest_{args.label}"
 os.makedirs(basedir, exist_ok=True)
 outputfiles_basename = (
     basedir + f"/jetsimpy_"
@@ -331,7 +317,7 @@ for key, value in priors_uniform.items():
     if value["low"] == value["high"]:
         params[key] = value["low"]
 
-lc_plot(params, observed_data=args.fullobsfile)
+lc_plot(basedir, params, observed_data=args.fullobsfile)
 
 if args.alert:
     message = f"Sameer: Run is complete. maxllh={maxllh:.2f}. Please check the parameters:" + "\n" + params_str
