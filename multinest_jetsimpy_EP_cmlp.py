@@ -1,3 +1,16 @@
+"""
+Multinest-based parameter inference for GRB afterglow with jetsimpy.
+
+This script fits GRB afterglow light curves using MultiNest (via PyMultiNest) and the
+`jetsimpy` model. It logs the run, saves the best-fit parameters, produces a corner
+plot of the posterior, and generates model vs. data light-curve plots. Optional
+Telegram alerts can be sent when the run completes.
+
+Example:
+  mpirun -n 24 python multinest_jetsimpy_EP_cmlp.py --obsfile data/GRB250916A_cons.csv 
+  --fullobsfile data/GRB250916A_cons.csv --label 'test'  --jetType tophat --livepoints 50 
+  -z 2.011 --alert
+"""
 import json
 import os
 import random
@@ -86,7 +99,17 @@ def log_likelihood(cube, ndim, nparams):
 
 ################################################
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(
+    description="Fit GRB afterglow light curves with PyMultiNest and jetsimpy; saves posterior corner plots and best-fit light-curve.",
+    formatter_class=argparse.RawTextHelpFormatter,
+    epilog=(
+        "Example:\n"
+        "  mpirun -n 24 python multinest_jetsimpy_EP_cmlp.py --obsfile data/GRB250916A_cons.csv "
+        "--fullobsfile data/GRB250916A_cons.csv --label 'test'  --jetType tophat --livepoints 50 "
+        "-z 2.011 --alert\n"
+    ),
+)
+
 parser.add_argument('--jetType', type=str, default='tophat')
 parser.add_argument('--livepoints', type=int, default=500)
 parser.add_argument('--label', type=str, default='')
