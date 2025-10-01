@@ -18,7 +18,15 @@
 #   python jetsimpy_plot.py --obsfile data/GRB250916A_cons.csv  \
 # --params '{jetType: tophat, e0: 4.87e52, epsb: 0.0448, epse: 0.3981, \
 # n0: 0.0032, thc: 0.0623, thv: 0.0014, p: 2.3578, lf: 100, A: 0, s: 0, z: 2.011}'
+# 
+# You can also use this code as a library.
+# Example:
+# import jetsimpy_plot as jsim
+# %matplotlib inline # if you want to show plots interactively in a jupyter notebook
+# import matplotlib.pyplot as plt
 
+# params={'jetType': 'tophat', 'e0': 4.87e52, 'epsb': 0.0448, 'epse': 0.3981, 'n0': 0.0032, 'thc': 0.0623, 'thv': 0.0014, 'p': 2.3578, 'loglf': 100, 'A': 0, 's': 0, 'z': 2.011}
+# jsim.lc_plot(basedir="output", params=params, observed_data='data/GRB250916A_cons.csv', show_plot=True, save_plot=False)
 
 import json
 import os
@@ -135,7 +143,7 @@ filt_freqs={'i':393170436721311.5, 'z':328215960148894.2,
     'SAO-R':45562310000000, 'X-ray(10keV)': 2.42e+18, 'X-ray(1keV)': 2.42e+17,
     'radio(1.3GHz)': 1.3e9, 'radio(6GHz)': 6e9, 'radio(10GHz)': 1e10, 'radio(15GHz)': 1.5e10}
 
-def lc_plot(basedir, params, observed_data):
+def lc_plot(basedir, params, observed_data, show_plot=False, save_plot=True):
 
     # Time and Frequencies
     ta = 1.0e4
@@ -179,12 +187,14 @@ def lc_plot(basedir, params, observed_data):
                 elinewidth=0.5, capsize=2
         )
 
-    #ax.tick_params(axis="both",direction="in")
+    ax.tick_params(axis='both', which='both', direction='in', top=True, right=True)
 
     ax.set_xscale('log')
     ax.set_yscale('log')
+    ax.set_ylim(1e-9,1e4)
     ax.set_xlabel(r'$t$ (s)')
     ax.set_ylabel(r'$F_\nu$ (mJy)')
+    ax.grid(True, which='both', linestyle='--', alpha=0.3)
 
     # Create text content with all Z dictionary values
     z_text = ''
@@ -220,11 +230,13 @@ def lc_plot(basedir, params, observed_data):
     ax.legend(edgecolor='none', loc="lower left", ncol=2)
     fig.tight_layout()
 
-    logging.info(f"Saving lightcurve fit plot to: {basedir}/lc_afterflow_obs_matching.pdf")
-    fig.savefig(f"{basedir}/lc_afterflow_obs_matching.pdf", format='pdf', bbox_inches='tight')
-    logging.info(f"Saving lightcurve fit plot to: {basedir}/lc_afterflow_obs_matching.png")
-    fig.savefig(f"{basedir}/lc_afterflow_obs_matching.png", format='png', bbox_inches='tight')
-    #plt.show()
+    if save_plot:
+        logging.info(f"Saving lightcurve fit plot to: {basedir}/lc_afterflow_obs_matching.pdf")
+        fig.savefig(f"{basedir}/lc_afterflow_obs_matching.pdf", format='pdf', bbox_inches='tight')
+        logging.info(f"Saving lightcurve fit plot to: {basedir}/lc_afterflow_obs_matching.png")
+        fig.savefig(f"{basedir}/lc_afterflow_obs_matching.png", format='png', bbox_inches='tight')
+    if show_plot:
+        plt.show()
     plt.close(fig)
 
 ################################################
