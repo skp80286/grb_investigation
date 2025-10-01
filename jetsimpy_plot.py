@@ -136,12 +136,14 @@ def model(obs_time, obs_nu, params):
         raise
     return model_flux
 
-multipliers = {'X-ray(1keV)': 1.0, 'X-ray(10keV)': 1.0, 'g': 0.125, 'L': 1, 'R': 1,'r': 1, 'i': 8.0, 'z': 16.0, 'J': 32.0, 'radio(1.3GHz)': 100.0, 'radio(6GHz)': 400, 'radio(10GHz)': 1500, 'radio(15GHz)': 2000}
+multipliers = {'X-ray(1keV)': 1.0, 'X-ray(10keV)': 1.0, 'g': 0.125, 'L': 1, 'R': 1,'r': 1, 
+'i': 8.0, 'u': 8.0, 'z': 16.0, 'J': 32.0, 
+'radio(1.3GHz)': 100.0, 'radio(6GHz)': 400, 'radio(10GHz)': 1500, 'radio(15GHz)': 2000}
 filt_freqs={'i':393170436721311.5, 'z':328215960148894.2,
     'VT_B':605000000000000.0, 'VT_R':381000000000000.0, 'r':481130569731985.2, 'J':240000000000000.0, 
     'g':628495719077568.1,'R':468671768303359.2, 'L':86898551000000,
     'SAO-R':45562310000000, 'X-ray(10keV)': 2.42e+18, 'X-ray(1keV)': 2.42e+17,
-    'radio(1.3GHz)': 1.3e9, 'radio(6GHz)': 6e9, 'radio(10GHz)': 1e10, 'radio(15GHz)': 1.5e10}
+    'radio(1.3GHz)': 1.3e9, 'radio(6GHz)': 6e9, 'radio(10GHz)': 1e10, 'radio(15GHz)': 1.5e10, 'u': 865201898990000}
 
 def lc_plot(basedir, params, observed_data, show_plot=False, save_plot=True):
 

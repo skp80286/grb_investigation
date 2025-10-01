@@ -29,6 +29,5 @@ GCN number,Magnitude,Error,Time - t0 (hours),Filter ,Instrument
 0,21.5,0.21,86.975,r,SEDM																				
 0,21.17,0.19,87.04,i,SEDM			
 41938,21.52,0.2,29.08,u,Swift/UVOT																				
-41938,21.9,0.3,28.5,white,Swift/UVOT	
 42024,23,0.25,159.84,VT_R,SVOM/VT																				
 42024,23.5,0.3,159.84,VT_B,SVOM/VT																				
