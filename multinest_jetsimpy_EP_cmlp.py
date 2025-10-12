@@ -2,6 +2,7 @@ import json
 import os
 import random
 import datetime
+import time
 import warnings
 
 import sys
@@ -26,6 +27,9 @@ import argparse
 import requests
 
 from jetsimpy_plot import model, lc_plot
+
+from mpi4py import MPI
+
 
 #### telegram:
 tele_token = os.environ["Tele_GITbot_Token"]
@@ -85,6 +89,11 @@ def log_likelihood(cube, ndim, nparams):
     return llh
 
 ################################################
+
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+size = comm.Get_size()
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--jetType', type=str, default='tophat')
@@ -180,20 +189,20 @@ priors_uniform = {
 """
 #tophat
 priors_uniform = {
-    "loge0": {"low": 51, "high": 55, "prior_type": "uniform"},
-    "logepsb": {"low": -2.15, "high": -2.15, "prior_type": "uniform"},
-    "logepse": {"low": -1.12, "high": -1.12, "prior_type": "uniform"},
-    "logn0": {"low": -1.56, "high": -1.56, "prior_type": "uniform"},
+    "loge0": {"low": 53, "high": 54, "prior_type": "uniform"},
+    "logepsb": {"low": -4.0, "high": -1.0, "prior_type": "uniform"},
+    "logepse": {"low": -3.0, "high": -0.8, "prior_type": "uniform"},
+    "logn0": {"low": -2, "high": 0, "prior_type": "uniform"},
     #"ln0": {"low": -4.0, "high": 1.0, "prior_type": "uniform"},
-    "thc": {"low": 0.05, "high": 0.175, "prior_type": "log_uniform"},  # radians
-    "thv": {"low": 0.11, "high": 0.11, "prior_type": "log_uniform"},
-    "p": {"low": 2.1, "high": 2.1, "prior_type": "uniform"},
-    "s": {"low": 1, "high": 6, "prior_type": "uniform"},
-    "loglf": {"low": 100, "high": 100},
+    "thc": {"low": 0.005, "high": 0.1, "prior_type": "log_uniform"},  # radians
+    "thv": {"low": 0.001, "high": 0.1, "prior_type": "log_uniform"},
+    "p": {"low": 2.17, "high": 2.17, "prior_type": "uniform"},
+    "s": {"low": 1, "high": 8, "prior_type": "uniform"},
+    "loglf": {"low": 2, "high": 5, "prior_type": "log_uniform"},
     "A": {"low": 0.0, "high": 0.0},  ## fix at 0
 }
 
-if args.jetType != 'powerlaw': 
+if args.jetType == 'tophat': 
     priors_uniform["s"]["low"]=0
     priors_uniform["s"]["high"]=0
 param_names = [key for key in priors_uniform.keys() if priors_uniform[key]["low"] != priors_uniform[key]["high"]]
@@ -252,74 +261,82 @@ if not args.post_process_only:
     except Exception as e:
         logger.error(f'Caught exception in multicast run! {e}')
         raise
-    logger.info("Finished MultiNest run. Analyzing results")
+    logger.info(f"Finished MultiNest run. Process {rank}")
 
-# Create an Analyzer object
-a = analyse.Analyzer(n_params, outputfiles_basename=outputfiles_basename)
+if rank != 0: sys.exit(0)
+if rank == 0: # Only one process does the analysis
+    logger.info(f"Process {rank}: Analyzing results.")
+    time.sleep(3) # artificial barrier
+    #comm.Barrier() # All processes will wait here until every process reaches this point
+    print(f"Process {rank}: Finished pre-barrier work, entering barrier.")
 
-# Get the best-fit parameters (highest likelihood point)
-bestfit_params = a.get_best_fit()
+
+    # Create an Analyzer object
+    a = analyse.Analyzer(n_params, outputfiles_basename=outputfiles_basename)
+
+    # Get the best-fit parameters (highest likelihood point)
+    bestfit_params = a.get_best_fit()
 
 
-# Print the best-fit parameters
-params_str = ", ".join(
-    f"{param}={bestfit_params['parameters'][i]:.8f}"
-    for i, param in enumerate(param_names)
-)
-logger.info(f"Best-fit parameters: {params_str}")
-json.dump(bestfit_params["parameters"], open(outputfiles_basename + "params.json", "w"))
+    # Print the best-fit parameters
+    params_str = ", ".join(
+        f"{param}={bestfit_params['parameters'][i]:.8f}"
+        for i, param in enumerate(param_names)
+    )
+    logger.info(f"Best-fit parameters: {params_str}")
+    json.dump(bestfit_params["parameters"], open(outputfiles_basename + "params.json", "w"))
 
-# corner plot
-logger.info("Making corner plot")
-flat_samples = a.get_equal_weighted_posterior()[:, :-1]
-medians = np.median(flat_samples, axis=0)
-# labels
-corner.corner(
-    flat_samples,
-    labels=param_names,
-    show_titles=True,
-    truths=medians,
-    title_fmt=".2f",
-    title_kwargs={"fontsize": 12},
-    # add smooth
-    smooth=2,
-    quantiles=[0.16, 0.5, 0.84],
-    label_kwargs={"fontsize": 12},
-    hist_kwargs={"density": True, "alpha": 0.5},
-)
-# save the figure
-corner_plot_file = basedir + "/GRB_04B_mcmc_corner.pdf"
-logger.info(f"Saving corner plot: {corner_plot_file}")
-plt.savefig(
-    corner_plot_file,
-    dpi=300,
-    format="pdf",
-    bbox_inches="tight",
-)
-corner_plot_file = basedir + "/GRB_04B_mcmc_corner.png"
-logger.info(f"Saving corner plot: {corner_plot_file}")
-plt.savefig(
-    corner_plot_file,
-    dpi=300,
-    format="png",
-    bbox_inches="tight",
-)
+    # corner plot
+    logger.info("Making corner plot")
+    flat_samples = a.get_equal_weighted_posterior()[:, :-1]
+    medians = np.median(flat_samples, axis=0)
+    # labels
+    corner.corner(
+        flat_samples,
+        labels=param_names,
+        show_titles=True,
+        truths=medians,
+        title_fmt=".2f",
+        title_kwargs={"fontsize": 12},
+        # add smooth
+        smooth=2,
+        quantiles=[0.16, 0.5, 0.84],
+        label_kwargs={"fontsize": 12},
+        hist_kwargs={"density": True, "alpha": 0.5},
+    )
+    # save the figure
+    corner_plot_file = basedir + "/GRB_04B_mcmc_corner.pdf"
+    logger.info(f"Saving corner plot: {corner_plot_file}")
+    plt.savefig(
+        corner_plot_file,
+        dpi=300,
+        format="pdf",
+        bbox_inches="tight",
+    )
+    corner_plot_file = basedir + "/GRB_04B_mcmc_corner.png"
+    logger.info(f"Saving corner plot: {corner_plot_file}")
+    plt.savefig(
+        corner_plot_file,
+        dpi=300,
+        format="png",
+        bbox_inches="tight",
+    )
 
-# light curve fitting plot
-params = {}
-params['jetType']=args.jetType
-params['z']=args.redshift
-#params['logepse']=-1
-#params['loglf']=np.log10(200.0)
-for i, value in enumerate(bestfit_params["parameters"]):
-    params[param_names[i]] = value
-for key, value in priors_uniform.items():
-    if value["low"] == value["high"]:
-        params[key] = value["low"]
+    # light curve fitting plot
+    params = {}
+    params['jetType']=args.jetType
+    params['z']=args.redshift
+    #params['logepse']=-1
+    #params['loglf']=np.log10(200.0)
+    for i, value in enumerate(bestfit_params["parameters"]):
+        params[param_names[i]] = value
+    for key, value in priors_uniform.items():
+        if value["low"] == value["high"]:
+            params[key] = value["low"]
 
-lc_plot(basedir, params, observed_data=args.fullobsfile)
+    lc_plot(basedir, params, observed_data=args.fullobsfile)
 
-if args.alert:
-    message = f"Sameer: Run is complete. maxllh={maxllh:.2f}. Please check the parameters:" + "\n" + params_str
-    Tele_alert(tele_token, chat_id, message)
+    if args.alert:
+        message = f"Sameer: Run is complete. maxllh={maxllh:.2f}. Please check the parameters:" + "\n" + params_str
+        Tele_alert(tele_token, chat_id, message)
 

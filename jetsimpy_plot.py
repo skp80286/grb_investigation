@@ -136,7 +136,7 @@ def model(obs_time, obs_nu, params):
         raise
     return model_flux
 
-multipliers = {'X-ray(1keV)': 1.0, 'X-ray(10keV)': 1.0, 'g': 0.125, 'L': 1, 'R': 1,'r': 1, 
+multipliers = {'X-ray(1keV)': 10.0, 'X-ray(10keV)': 100.0, 'g': 1.0, 'L': 1, 'R': 1,'r': 1, 
 'i': 8.0, 'u': 8.0, 'z': 16.0, 'J': 32.0, 
 'radio(1.3GHz)': 100.0, 'radio(6GHz)': 400, 'radio(10GHz)': 1500, 'radio(15GHz)': 2000}
 filt_freqs={'i':393170436721311.5, 'z':328215960148894.2,
