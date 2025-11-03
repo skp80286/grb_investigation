@@ -136,16 +136,17 @@ def model(obs_time, obs_nu, params):
         raise
     return model_flux
 
-multipliers = {'X-ray(1keV)': 10.0, 'X-ray(10keV)': 100.0, 'g': 1.0, 'L': 1, 'R': 1,'r': 1, 
-'i': 8.0, 'u': 8.0, 'z': 16.0, 'J': 32.0, 
-'radio(1.3GHz)': 100.0, 'radio(6GHz)': 400, 'radio(10GHz)': 1500, 'radio(15GHz)': 2000}
+#multipliers = {'X-ray(1keV)': 10.0, 'X-ray(10keV)': 100.0, 'g': 1.0, 'L': 1, 'R': 1,'r': 1, 
+#'i': 8.0, 'u': 8.0, 'z': 16.0, 'J': 32.0, 
+#'radio(1.3GHz)': 100.0, 'radio(6GHz)': 400, 'radio(10GHz)': 1500, 'radio(15GHz)': 2000}
+multipliers = {'X-ray(10keV)': 10.0, 'g': 1.0, 'L': 2,'r': 4, 'i': 8.0, 'z': 16.0, 'J': 32.0, 'radio(10GHz)': 1500}
 filt_freqs={'i':393170436721311.5, 'z':328215960148894.2,
     'VT_B':605000000000000.0, 'VT_R':381000000000000.0, 'r':481130569731985.2, 'J':240000000000000.0, 
     'g':628495719077568.1,'R':468671768303359.2, 'L':86898551000000,
     'SAO-R':45562310000000, 'X-ray(10keV)': 2.42e+18, 'X-ray(1keV)': 2.42e+17,
     'radio(1.3GHz)': 1.3e9, 'radio(6GHz)': 6e9, 'radio(10GHz)': 1e10, 'radio(15GHz)': 1.5e10, 'u': 865201898990000}
 
-def lc_plot(basedir, params, observed_data, show_plot=False, save_plot=True):
+def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False, save_plot=True):
 
     # Time and Frequencies
     ta = 1.0e4
@@ -156,8 +157,10 @@ def lc_plot(basedir, params, observed_data, show_plot=False, save_plot=True):
     df_fit = None
 
     fig, ax = plt.subplots(1, 1, figsize=(8, 5))
-    cmap = matplotlib.colormaps.get_cmap('rainbow_r')  # or 'plasma', 'cividis', 'magma'
-    colors = cmap(np.linspace(0, 1, len(filt_freqs)))
+    # cmap = matplotlib.colormaps.get_cmap('rainbow_r')  # or 'plasma', 'cividis', 'magma'
+    # colors = cmap(np.linspace(0, 1, len(filt_freqs)))
+
+    colors=['tab:purple', 'darkgreen', 'tab:red', 'darkgoldenrod', 'olive', 'royalblue', '#580F41', 'lavender', 'orange', 'cyan']
 
     # plot the model curves - expected lightcurve from jetsimpy
     for i, (band,nu) in enumerate(filt_freqs.items()):
@@ -166,12 +169,16 @@ def lc_plot(basedir, params, observed_data, show_plot=False, save_plot=True):
         #print(f"Calculating for frequency: {nu}")
         Fnu_model = []
 
-        Fnu_model = model(t, [nu], params)
+        Fnu_model = model(t, [nu], median_params)
         #print(f'Fnu_model: {Fnu_model}')
         Fnu_model = np.array(Fnu_model)
         #print(f'Fnu_model.shape: {Fnu_model.shape}')
 
-        ax.plot(t, Fnu_model*multiplier,  linewidth=2.0, label=f'{band} x {multiplier}', color=colors[i])
+        ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, label=f'{band} x {multiplier}', color=colors[i % len(colors)])
+        for params in sig3_params:
+            Fnu_model = np.array(model(t, [nu], params))
+            ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, color=colors[i % len(colors)], alpha=0.1)
+
 
     # plot the actual observations
     for i, (band,nu) in enumerate(filt_freqs.items()):
@@ -179,13 +186,14 @@ def lc_plot(basedir, params, observed_data, show_plot=False, save_plot=True):
         else: continue
 
         Fnu_allobs = df_allobs[df_allobs['Filt']==band][['Times','Fluxes', 'FluxErrs']].sort_values(by='Times').to_numpy()
+        print(f'Plotting band={band}, {len(Fnu_allobs)} rows.')
 
         ax.errorbar(
                 Fnu_allobs[:,0], Fnu_allobs[:,1]*multiplier,
                 yerr=Fnu_allobs[:,2]*multiplier,
                 fmt='o',
-                markersize=4, alpha=1,
-                color=colors[i], ecolor=colors[i],
+                markersize=8, alpha=1,
+                color=colors[i % len(colors)], mec='black',
                 elinewidth=0.5, capsize=2
         )
 
@@ -200,7 +208,7 @@ def lc_plot(basedir, params, observed_data, show_plot=False, save_plot=True):
 
     # Create text content with all Z dictionary values
     z_text = ''
-    for key, value in params.items():
+    for key, value in median_params.items():
         if key in ['specType', 'z', 'E0']:
             continue
             # Skip function objects, just show the key
@@ -236,7 +244,7 @@ def lc_plot(basedir, params, observed_data, show_plot=False, save_plot=True):
         logging.info(f"Saving lightcurve fit plot to: {basedir}/lc_afterflow_obs_matching.pdf")
         fig.savefig(f"{basedir}/lc_afterflow_obs_matching.pdf", format='pdf', bbox_inches='tight')
         logging.info(f"Saving lightcurve fit plot to: {basedir}/lc_afterflow_obs_matching.png")
-        fig.savefig(f"{basedir}/lc_afterflow_obs_matching.png", format='png', bbox_inches='tight')
+        fig.savefig(f"{basedir}/lc_afterflow_obs_matching.png", format='png', bbox_inches='tight', dpi=300)
     if show_plot:
         plt.show()
     plt.close(fig)

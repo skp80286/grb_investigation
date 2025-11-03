@@ -74,8 +74,12 @@ def log_likelihood(cube, ndim, nparams):
     #print(f'obs_time={obs_time},\nobs_nu={obs_nu},\nobs_flux={obs_flux},\nmodel_flux={model_flux}')
     # log_model_flux = np.log(model_flux)
     # log_obs_flux = np.log(obs_flux)
-    # log_obs_flux_err = obs_flux_err / obs_flux
-    residuals = np.log(obs_flux / model_flux) #/ log_obs_flux_err
+    #log_obs_flux_err = obs_flux_err / obs_flux
+    #residuals = np.log(obs_flux / model_flux) / log_obs_flux_err
+    #residuals =  1- (obs_flux / model_flux) 
+    #residuals = np.log(obs_flux / model_flux) / (obs_flux_err / obs_flux)
+    residuals = np.log(obs_flux / model_flux) / np.log(obs_flux_err)
+
     #logger.info(f"original residuals={residuals}")
     if args.use_band_weights:
         residuals *= obs_weights
@@ -84,8 +88,8 @@ def log_likelihood(cube, ndim, nparams):
     global maxllh
     if llh > maxllh:
         maxllh = llh
-        params_str = ", ".join( f"{param}={cube[i]:.8f}" for i, param in enumerate(param_names)) 
-        logger.info(f"Log-likelihood: {llh}, {params_str}, \nobs_flux={obs_flux}\n, model_flux={model_flux}")
+        #params_str = ", ".join( f"{param}={cube[i]:.8f}" for i, param in enumerate(param_names)) 
+        #logger.info(f"Log-likelihood: {llh}, {params_str}, \nobs_flux={obs_flux}\n, model_flux={model_flux}")
     return llh
 
 ################################################
@@ -186,19 +190,57 @@ priors_uniform = {
     "A": {"low": 0.0, "high": 0.0},  ## fix at 0
 }
 
-"""
-#tophat
 priors_uniform = {
-    "loge0": {"low": 53, "high": 54, "prior_type": "uniform"},
-    "logepsb": {"low": -4.0, "high": -1.0, "prior_type": "uniform"},
-    "logepse": {"low": -3.0, "high": -0.8, "prior_type": "uniform"},
-    "logn0": {"low": -2, "high": 0, "prior_type": "uniform"},
-    #"ln0": {"low": -4.0, "high": 1.0, "prior_type": "uniform"},
-    "thc": {"low": 0.005, "high": 0.1, "prior_type": "log_uniform"},  # radians
-    "thv": {"low": 0.001, "high": 0.1, "prior_type": "log_uniform"},
-    "p": {"low": 2.17, "high": 2.17, "prior_type": "uniform"},
+    "loge0": {"low": 53, "high": 54.5, "prior_type": "uniform"},
+    "logepsb": {"low": -2.2441, "high": -2.2441, "prior_type": "uniform"},
+    "logepse": {"low": -1.0, "high": -1.0, "prior_type": "uniform"},
+    "logn0": {"low": -1.9076, "high": -1.9076, "prior_type": "uniform"},
+    "thc": {"low": 0.05, "high": 0.05, "prior_type": "log_uniform"},  # radians
+    "thv": {"low": 0.005, "high": 0.005, "prior_type": "log_uniform"},
+    "p": {"low": 2.2053, "high": 2.2053, "prior_type": "uniform"},
     "s": {"low": 1, "high": 8, "prior_type": "uniform"},
-    "loglf": {"low": 2, "high": 5, "prior_type": "log_uniform"},
+    "loglf": {"low": 3, "high": 3, "prior_type": "uniform"},
+    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
+}
+# tophat
+priors_uniform = {
+    "loge0": {"low": 53.75, "high": 53.75, "prior_type": "uniform"},
+    "logepsb": {"low": -5.0, "high": -1, "prior_type": "uniform"},
+    "logepse": {"low": -1.5, "high": -0.7, "prior_type": "uniform"},
+    "logn0": {"low": -1, "high": 0, "prior_type": "uniform"},
+    "thc": {"low": 0.065, "high": 0.065, "prior_type": "log_uniform"},  # radians
+    "thv": {"low": 0.0, "high": 0.09, "prior_type": "log_uniform"},
+    "p": {"low": 2.2, "high": 2.2, "prior_type": "uniform"},
+    "s": {"low": 4, "high": 4, "prior_type": "uniform"},
+    "loglf": {"low": 3, "high": 3, "prior_type": "uniform"},
+    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
+}
+#powerlaw
+priors_uniform = {
+    "loge0": {"low": 53.5, "high": 54.5, "prior_type": "uniform"},
+    "logepsb": {"low": -2.61, "high": -2.61, "prior_type": "uniform"},
+    "logepse": {"low": -1.16, "high": -1.16, "prior_type": "uniform"},
+    "logn0": {"low": -0.95, "high": -0.95, "prior_type": "uniform"},
+    "thc": {"low": 0.08, "high": 0.2, "prior_type": "log_uniform"},  # radians
+    "thv": {"low": 0.0, "high": 0.08, "prior_type": "log_uniform"},
+    "p": {"low": 2.2, "high": 2.2, "prior_type": "uniform"},
+    "s": {"low": 2, "high": 10, "prior_type": "uniform"},
+    "loglf": {"low": 1, "high": 10, "prior_type": "uniform"},
+    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
+}
+"""
+
+#powerlaw
+priors_uniform = {
+    "loge0": {"low": 53.75, "high": 53.75, "prior_type": "uniform"},
+    "logepsb": {"low": -5, "high": -1, "prior_type": "uniform"},
+    "logepse": {"low": -1.5, "high": -0.5, "prior_type": "uniform"},
+    "logn0": {"low": -2, "high": 0.0, "prior_type": "uniform"},
+    "thc": {"low": 0.08, "high": 0.3, "prior_type": "log_uniform"},  # radians
+    "thv": {"low": 0.0, "high": 0.1, "prior_type": "log_uniform"},
+    "p": {"low": 2.2, "high": 2.2, "prior_type": "uniform"},
+    "s": {"low": 4, "high": 4, "prior_type": "uniform"},
+    "loglf": {"low": 5, "high": 5, "prior_type": "uniform"},
     "A": {"low": 0.0, "high": 0.0},  ## fix at 0
 }
 
@@ -244,6 +286,7 @@ if not args.post_process_only:
 
     maxllh = -1e6
 
+    logger.info(f"Observations file has {len(obs_flux)} records.")
     logger.info(f"Starting MultiNest run with {n_params} parameters: {param_names}.")
     try:
         pymultinest.run(
@@ -290,6 +333,15 @@ if rank == 0: # Only one process does the analysis
     logger.info("Making corner plot")
     flat_samples = a.get_equal_weighted_posterior()[:, :-1]
     medians = np.median(flat_samples, axis=0)
+
+    covariance = np.cov(flat_samples, rowvar=False)
+    sigma = np.sqrt(np.diagonal(covariance))
+    lower_bounds = medians - 3 * sigma
+    upper_bounds = medians + 3 * sigma
+    sig3_flat_samples = flat_samples[
+        np.all((flat_samples >= lower_bounds) & (flat_samples <= upper_bounds), axis=1)
+    ]
+
     # labels
     corner.corner(
         flat_samples,
@@ -305,7 +357,7 @@ if rank == 0: # Only one process does the analysis
         hist_kwargs={"density": True, "alpha": 0.5},
     )
     # save the figure
-    corner_plot_file = basedir + "/GRB_04B_mcmc_corner.pdf"
+    corner_plot_file = basedir + "/multinest_corner.pdf"
     logger.info(f"Saving corner plot: {corner_plot_file}")
     plt.savefig(
         corner_plot_file,
@@ -313,7 +365,7 @@ if rank == 0: # Only one process does the analysis
         format="pdf",
         bbox_inches="tight",
     )
-    corner_plot_file = basedir + "/GRB_04B_mcmc_corner.png"
+    corner_plot_file = basedir + "/multinest_corner.png"
     logger.info(f"Saving corner plot: {corner_plot_file}")
     plt.savefig(
         corner_plot_file,
@@ -323,20 +375,39 @@ if rank == 0: # Only one process does the analysis
     )
 
     # light curve fitting plot
-    params = {}
-    params['jetType']=args.jetType
-    params['z']=args.redshift
+    logger.info(f"Creating lightcurve plot")
+    median_params = {}
+    median_params['jetType']=args.jetType
+    median_params['z']=args.redshift
     #params['logepse']=-1
     #params['loglf']=np.log10(200.0)
-    for i, value in enumerate(bestfit_params["parameters"]):
-        params[param_names[i]] = value
     for key, value in priors_uniform.items():
         if value["low"] == value["high"]:
-            params[key] = value["low"]
+            median_params[key] = value["low"]
+    logger.info(f'Fixed parameters: {median_params}')
+    for i, value in enumerate(medians):
+        median_params[param_names[i]] = value
+    logger.info(f'Median parameters: {median_params}')
 
-    lc_plot(basedir, params, observed_data=args.fullobsfile)
+    sig3_params = []
+    for i in np.random.randint(len(sig3_flat_samples), size=50):
+        sample = sig3_flat_samples[i]
+        params = {}
+        params['jetType']=args.jetType
+        params['z']=args.redshift
+        #params['logepse']=-1
+        #params['loglf']=np.log10(200.0)
+        for i, value in enumerate(sample):
+            params[param_names[i]] = value
+        for key, value in priors_uniform.items():
+            if value["low"] == value["high"]:
+                params[key] = value["low"]
+        sig3_params.append(params)
+    logger.info(f'3 Sigma parameters: {sig3_params[:10]}')
+
+    lc_plot(basedir, median_params, sig3_params, observed_data=args.fullobsfile)
 
     if args.alert:
-        message = f"Sameer: Run is complete. maxllh={maxllh:.2f}. Please check the parameters:" + "\n" + params_str
+        message = f"Run is complete. maxllh={maxllh:.2f}. Please check the parameters:" + "\n" + params_str
         Tele_alert(tele_token, chat_id, message)
 
