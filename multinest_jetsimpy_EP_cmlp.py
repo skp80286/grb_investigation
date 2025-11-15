@@ -27,6 +27,7 @@ import argparse
 import requests
 
 from jetsimpy_plot import model, lc_plot
+from print_params import format_parameters_table, format_dict_table
 
 from mpi4py import MPI
 
@@ -75,16 +76,34 @@ def log_likelihood(cube, ndim, nparams):
     # log_model_flux = np.log(model_flux)
     # log_obs_flux = np.log(obs_flux)
     #log_obs_flux_err = obs_flux_err / obs_flux
-    #residuals = np.log(obs_flux / model_flux) / log_obs_flux_err
+    ### residuals = np.log(obs_flux / model_flux) / obs_flux_err 
+    #residuals = np.log(obs_flux / model_flux)
     #residuals =  1- (obs_flux / model_flux) 
-    #residuals = np.log(obs_flux / model_flux) / (obs_flux_err / obs_flux)
-    residuals = np.log(obs_flux / model_flux) / np.log(obs_flux_err)
+    ## residuals = np.log(obs_flux / model_flux) / (obs_flux_err / obs_flux)
+    #residuals = np.log(obs_flux / model_flux) / np.log(obs_flux)
+    #residuals = np.log(obs_flux / model_flux) / np.log(obs_flux_err)
+
+    # Residuals and chi2 term
+    residual = (model_flux / obs_flux) - 1
+    err = obs_flux_err / obs_flux
+
+    # Protect against zero or negative errors by flooring
+    #err_floor = 1e-20
+    #obs_flux_err = np.maximum(obs_flux_err, err_floor)
+
+    #chi2 = np.sum((residual / (obs_flux_err / obs_flux)) ** 2)
+    chi2 = np.sum((residual/err) ** 2)
+
+    # Log-determinant term
+    logdet = np.sum(np.log(2.0 * np.pi * err**2))
+
 
     #logger.info(f"original residuals={residuals}")
     if args.use_band_weights:
-        residuals *= obs_weights
+        chi2 *= obs_weights
     #logger.info(f"weighted residuals={residuals}")
-    llh = -0.5 * np.sum(residuals**2)
+    #llh = -0.5 * np.sum(residuals**2)
+    llh = -0.5 * (chi2 + logdet)
     global maxllh
     if llh > maxllh:
         maxllh = llh
@@ -228,9 +247,6 @@ priors_uniform = {
     "loglf": {"low": 1, "high": 10, "prior_type": "uniform"},
     "A": {"low": 0.0, "high": 0.0},  ## fix at 0
 }
-"""
-
-#powerlaw
 priors_uniform = {
     "loge0": {"low": 53.75, "high": 53.75, "prior_type": "uniform"},
     "logepsb": {"low": -5, "high": -1, "prior_type": "uniform"},
@@ -241,6 +257,20 @@ priors_uniform = {
     "p": {"low": 2.2, "high": 2.2, "prior_type": "uniform"},
     "s": {"low": 4, "high": 4, "prior_type": "uniform"},
     "loglf": {"low": 5, "high": 5, "prior_type": "uniform"},
+    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
+}
+"""
+
+priors_uniform = {
+    "loge0": {"low": 53, "high": 55},
+    "logepsb": {"low": -8, "high": -1},
+    "logepse": {"low": -1.5, "high": -0.8},
+    "logn0": {"low": -2, "high": 0},
+    "logthc": {"low": -3, "high": -0.5},  # radians
+    "logthv": {"low": -5, "high": -1.0},  # radians
+    "p": {"low": 2.01, "high": 3.00},
+    "s": {"low": 3, "high": 3},
+    "loglf": {"low": 3.0, "high": 3.0},
     "A": {"low": 0.0, "high": 0.0},  ## fix at 0
 }
 
@@ -384,10 +414,10 @@ if rank == 0: # Only one process does the analysis
     for key, value in priors_uniform.items():
         if value["low"] == value["high"]:
             median_params[key] = value["low"]
-    logger.info(f'Fixed parameters: {median_params}')
+    logger.info(format_dict_table(median_params, "Fixed parameters"))
     for i, value in enumerate(medians):
         median_params[param_names[i]] = value
-    logger.info(f'Median parameters: {median_params}')
+    logger.info(f'Inferred parameters: \n{format_parameters_table(median_params, priors_uniform)}')
 
     sig3_params = []
     for i in np.random.randint(len(sig3_flat_samples), size=50):
