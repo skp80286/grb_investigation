@@ -85,7 +85,6 @@ def log_likelihood(cube, ndim, nparams):
 
     # Residuals and chi2 term
     residual = (model_flux / obs_flux) - 1
-    err = obs_flux_err / obs_flux
 
     # Protect against zero or negative errors by flooring
     #err_floor = 1e-20
@@ -93,10 +92,6 @@ def log_likelihood(cube, ndim, nparams):
 
     #chi2 = np.sum((residual / (obs_flux_err / obs_flux)) ** 2)
     chi2 = np.sum((residual/err) ** 2)
-
-    # Log-determinant term
-    logdet = np.sum(np.log(2.0 * np.pi * err**2))
-
 
     #logger.info(f"original residuals={residuals}")
     if args.use_band_weights:
@@ -259,17 +254,29 @@ priors_uniform = {
     "loglf": {"low": 5, "high": 5, "prior_type": "uniform"},
     "A": {"low": 0.0, "high": 0.0},  ## fix at 0
 }
+priors_uniform = {
+    "loge0": {"low": 53, "high": 55},
+    "epsb": {"low": 1e-8, "high": 1e-1, "prior_type": "log_uniform"},
+    "epse": {"low": 0.01, "high": 0.2, "prior_type": "log_uniform"},
+    "n0": {"low": 1, "high": 1, "prior_type": "log_uniform"},
+    "thc": {"low": 0.001, "high": 0.1, "prior_type": "log_uniform"},  # radians
+    "thv": {"low": 0.001, "high": 0.1, "prior_type": "log_uniform"},  # radians
+    "p": {"low": 2.01, "high": 2.4, "prior_type": "log_uniform"},
+    "s": {"low": 1, "high": 8, "prior_type": "log_uniform"},
+    "loglf": {"low": 3.0, "high": 3.0},
+    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
+}
 """
 
 priors_uniform = {
     "loge0": {"low": 53, "high": 55},
     "logepsb": {"low": -8, "high": -1},
     "logepse": {"low": -1.5, "high": -0.8},
-    "logn0": {"low": -2, "high": 0},
-    "logthc": {"low": -3, "high": -0.5},  # radians
-    "logthv": {"low": -5, "high": -1.0},  # radians
+    "logn0": {"low": -0.8, "high": -0.8},
+    "logthc": {"low": -3.0, "high": -0.5},  # radians
+    "logthv": {"low": -5, "high": -0.5},  # radians
     "p": {"low": 2.01, "high": 3.00},
-    "s": {"low": 3, "high": 3},
+    "s": {"low": 1, "high": 8},
     "loglf": {"low": 3.0, "high": 3.0},
     "A": {"low": 0.0, "high": 0.0},  ## fix at 0
 }
@@ -306,6 +313,10 @@ if not args.post_process_only:
     obs_nu = data["Freqs"].to_numpy()  # in Hz
     obs_flux = data["Fluxes"].to_numpy()  # in mJy
     obs_flux_err = data["FluxErrs"].to_numpy()  # in mJy
+    # Log-determinant term
+    err = obs_flux_err / obs_flux
+    logdet = np.sum(np.log(2.0 * np.pi * err**2))
+
     obs_weights = np.ones(len(obs_flux))
     if args.use_band_weights:
         for i,band in enumerate(data["Filt"]):

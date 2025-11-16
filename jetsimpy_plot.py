@@ -139,7 +139,7 @@ def model(obs_time, obs_nu, params):
 #multipliers = {'X-ray(1keV)': 10.0, 'X-ray(10keV)': 100.0, 'g': 1.0, 'L': 1, 'R': 1,'r': 1, 
 #'i': 8.0, 'u': 8.0, 'z': 16.0, 'J': 32.0, 
 #'radio(1.3GHz)': 100.0, 'radio(6GHz)': 400, 'radio(10GHz)': 1500, 'radio(15GHz)': 2000}
-multipliers = {'X-ray(10keV)': 10.0, 'g': 1.0, 'L': 2,'r': 4, 'i': 8.0, 'z': 16.0, 'J': 32.0, 'radio(10GHz)': 1500}
+multipliers = {'X-ray(10keV)': 10.0, 'g': 1.0, 'r': 4, 'i': 8.0, 'z': 16.0, 'J': 32.0, 'radio(10GHz)': 1500}
 filt_freqs={'i':393170436721311.5, 'z':328215960148894.2,
     'VT_B':605000000000000.0, 'VT_R':381000000000000.0, 'r':481130569731985.2, 'J':240000000000000.0, 
     'g':628495719077568.1,'R':468671768303359.2, 'L':86898551000000,
@@ -163,9 +163,11 @@ def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False,
     colors=['tab:purple', 'darkgreen', 'tab:red', 'darkgoldenrod', 'olive', 'royalblue', '#580F41', 'lavender', 'orange', 'cyan']
 
     # plot the model curves - expected lightcurve from jetsimpy
+    j = -1
     for i, (band,nu) in enumerate(filt_freqs.items()):
         if band in multipliers: multiplier = multipliers[band]
         else: continue
+        j += 1
         #print(f"Calculating for frequency: {nu}")
         Fnu_model = []
 
@@ -174,16 +176,18 @@ def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False,
         Fnu_model = np.array(Fnu_model)
         #print(f'Fnu_model.shape: {Fnu_model.shape}')
 
-        ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, label=f'{band} x {multiplier}', color=colors[i % len(colors)])
+        ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, label=f'{band} x {multiplier}', color=colors[j % len(colors)])
         for params in sig3_params:
             Fnu_model = np.array(model(t, [nu], params))
-            ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, color=colors[i % len(colors)], alpha=0.1)
+            ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, color=colors[j % len(colors)], alpha=0.1)
 
 
     # plot the actual observations
+    j = -1
     for i, (band,nu) in enumerate(filt_freqs.items()):
         if band in multipliers: multiplier = multipliers[band]
         else: continue
+        j += 1
 
         Fnu_allobs = df_allobs[df_allobs['Filt']==band][['Times','Fluxes', 'FluxErrs']].sort_values(by='Times').to_numpy()
         print(f'Plotting band={band}, {len(Fnu_allobs)} rows.')
@@ -193,7 +197,7 @@ def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False,
                 yerr=Fnu_allobs[:,2]*multiplier,
                 fmt='o',
                 markersize=8, alpha=1,
-                color=colors[i % len(colors)], mec='black',
+                color=colors[j % len(colors)], mec='black',
                 elinewidth=0.5, capsize=2
         )
 
@@ -201,7 +205,7 @@ def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False,
 
     ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.set_ylim(1e-9,1e4)
+    ax.set_ylim(1e-9,1e5)
     ax.set_xlabel(r'$t$ (s)')
     ax.set_ylabel(r'$F_\nu$ (mJy)')
     ax.grid(True, which='both', linestyle='--', alpha=0.3)
