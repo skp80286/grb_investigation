@@ -42,7 +42,7 @@ def format_dict_table(d, title="Parameters"):
 
     return "\n".join(lines)
 
-def format_parameters_table(median_params, priors):
+def format_parameters_table(median_params, rel_sigma_params, priors):
     """
     Format median parameters and priors as an ASCII table string.
 
@@ -50,6 +50,8 @@ def format_parameters_table(median_params, priors):
     -----------
     median_params : dict
         Dictionary with parameter names as keys and posterior median values as values
+    rel_sigma_params : dict
+        Dictionary with parameter names as keys and posterior relative sigma values as values
     priors : dict
         Dictionary with parameter names as keys and dict with 'low' and 'high' as values
 
@@ -79,10 +81,11 @@ def format_parameters_table(median_params, priors):
     prior_low_width = max(len("Prior - low"), 12)
     prior_high_width = max(len("Prior - high"), 12)
     median_width = max(len("Posterior Median"), 15)
+    rel_sigma_width = max(len("Posterior Sigma(rel))"), 15)
 
     # Create header
-    header = f"| {'Parameter':<{param_width}} | {'Prior - low':<{prior_low_width}} | {'Prior - high':<{prior_high_width}} | {'Posterior Median':<{median_width}} |"
-    border = "+" + "-" * (param_width + 2) + "+" + "-" * (prior_low_width + 2) + "+" + "-" * (prior_high_width + 2) + "+" + "-" * (median_width + 2) + "+"
+    header = f"| {'Parameter':<{param_width}} | {'Prior - low':<{prior_low_width}} | {'Prior - high':<{prior_high_width}} | {'Posterior Median':<{median_width}} | {'Posterior Sigma(rel)':<{rel_sigma_width}} |"
+    border = "+" + "-" * (param_width + 2) + "+" + "-" * (prior_low_width + 2) + "+" + "-" * (prior_high_width + 2) + "+" + "-" * (median_width + 2) + "+" + "-" * (rel_sigma_width + 2) + "+"
 
     # Build table string
     lines = []
@@ -147,7 +150,14 @@ def format_parameters_table(median_params, priors):
         else:
             median_str = str(median_val)
 
-        lines.append(f"| {str(param):<{param_width}} | {prior_low_str:<{prior_low_width}} | {prior_high_str:<{prior_high_width}} | {median_str:<{median_width}} |")
+        # Get sigma value
+        sigma_val = rel_sigma_params.get(param, 'N/A')
+        if isinstance(sigma_val, (int, float)):
+            sigma_str = f"{sigma_val:.4f}"
+        else:
+            sigma_str = str(sigma_val)
+
+        lines.append(f"| {str(param):<{param_width}} | {prior_low_str:<{prior_low_width}} | {prior_high_str:<{prior_high_width}} | {median_str:<{median_width}} | {sigma_str:<{rel_sigma_width}} |")
 
     lines.append(border)
 
@@ -167,9 +177,10 @@ if __name__ == "__main__":
         "A": {"low": 0.0, "high": 0.0},  ## fix at 0
     }
     median_params = {'jetType': 'tophat', 'z': 2.011, 'logn0': 0, 'p': 2.07, 's': 0, 'loglf': 3.0, 'A': 0.0, 'loge0': 53.70432471174358, 'logepsb': -2.1332383740487253, 'logepse': -1.144602182702135, 'logthc': -1.0245131572950257, 'logthv': -1.3909562597529446}
+    sigma_params = {'logn0': 0.1, 'p': 0.07, 's': 0, 'loglf': 0.0, 'loge0': 0.070432471174358, 'logepsb': 0.1332383740487253, 'logepse': 0.0144602182702135, 'logthc': 0.00245131572950257, 'logthv': 0.3909562597529446}
     
     # Get the table as a string
-    table_str = format_parameters_table(median_params, priors_uniform)
+    table_str = format_parameters_table(median_params, sigma_params, priors_uniform)
     print(table_str)
     
     table_str = format_dict_table(params, "Parameters Dictionary")

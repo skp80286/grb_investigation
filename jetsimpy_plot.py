@@ -139,10 +139,10 @@ def model(obs_time, obs_nu, params):
 #multipliers = {'X-ray(1keV)': 10.0, 'X-ray(10keV)': 100.0, 'g': 1.0, 'L': 1, 'R': 1,'r': 1, 
 #'i': 8.0, 'u': 8.0, 'z': 16.0, 'J': 32.0, 
 #'radio(1.3GHz)': 100.0, 'radio(6GHz)': 400, 'radio(10GHz)': 1500, 'radio(15GHz)': 2000}
-multipliers = {'X-ray(10keV)': 10.0, 'g': 1.0, 'r': 4, 'i': 8.0, 'z': 16.0, 'J': 32.0, 'radio(10GHz)': 1500}
+multipliers = {'X-ray(10keV)': 10.0, 'g': 1.0, 'L': 2.0,'r': 4, 'i': 8.0, 'z': 16.0, 'J': 32.0, 'radio(10GHz)': 1500}
 filt_freqs={'i':393170436721311.5, 'z':328215960148894.2,
     'VT_B':605000000000000.0, 'VT_R':381000000000000.0, 'r':481130569731985.2, 'J':240000000000000.0, 
-    'g':628495719077568.1,'R':468671768303359.2, 'L':86898551000000,
+    'g':628495719077568.1,'R':468671768303359.2, 'L':5.5552E+14,
     'SAO-R':45562310000000, 'X-ray(10keV)': 2.42e+18, 'X-ray(1keV)': 2.42e+17,
     'radio(1.3GHz)': 1.3e9, 'radio(6GHz)': 6e9, 'radio(10GHz)': 1e10, 'radio(15GHz)': 1.5e10, 'u': 865201898990000}
 
@@ -160,7 +160,7 @@ def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False,
     # cmap = matplotlib.colormaps.get_cmap('rainbow_r')  # or 'plasma', 'cividis', 'magma'
     # colors = cmap(np.linspace(0, 1, len(filt_freqs)))
 
-    colors=['tab:purple', 'darkgreen', 'tab:red', 'darkgoldenrod', 'olive', 'royalblue', '#580F41', 'lavender', 'orange', 'cyan']
+    colors=['tab:purple', 'darkgreen', 'tab:red', 'darkgoldenrod', 'olive', 'royalblue', '#580F41', 'orange', 'cyan']
 
     # plot the model curves - expected lightcurve from jetsimpy
     j = -1
@@ -196,7 +196,7 @@ def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False,
                 Fnu_allobs[:,0], Fnu_allobs[:,1]*multiplier,
                 yerr=Fnu_allobs[:,2]*multiplier,
                 fmt='o',
-                markersize=8, alpha=1,
+                markersize=4, alpha=1,
                 color=colors[j % len(colors)], mec='black',
                 elinewidth=0.5, capsize=2
         )

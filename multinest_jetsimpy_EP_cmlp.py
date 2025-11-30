@@ -18,7 +18,7 @@ import pandas as pd
 import pymultinest
 import pymultinest.analyse as analyse
 
-# import redback
+import astropy
 from astropy.cosmology import Planck15 as cosmo
 from scipy import stats
 from scipy.optimize import curve_fit, minimize, newton
@@ -59,6 +59,22 @@ def log_prior(cube, ndim, nparams):
 
 ################################################
 
+def log_likelihood_vishwa(cube, ndim, nparams):
+    params = {name: cube[i] for i, name in enumerate(param_names)}
+    for name in priors_uniform.keys():
+        if priors_uniform[name]["low"] == priors_uniform[name]["high"]:
+            params[name] = priors_uniform[name]["low"]
+    params['jetType'] = args.jetType
+    params['z'] = args.redshift
+
+    model_flux = model(obs_time, obs_nu, params)
+    #log_obs_flux_err = obs_flux_err / obs_flux
+
+    residuals = np.log(obs_flux / model_flux) / err # log_obs_flux_err
+    llf = -0.5 * np.sum(residuals**2)
+    return llf
+
+
 maxllh = -1e6
 def log_likelihood(cube, ndim, nparams):
     # in log space
@@ -69,42 +85,42 @@ def log_likelihood(cube, ndim, nparams):
     params['jetType'] = args.jetType
     params['z'] = args.redshift
 
-    #if params["thv"]/params["thc"] > 1.5:
-        #return -np.inf
     model_flux = model(obs_time, obs_nu, params)
-    #print(f'obs_time={obs_time},\nobs_nu={obs_nu},\nobs_flux={obs_flux},\nmodel_flux={model_flux}')
-    # log_model_flux = np.log(model_flux)
-    # log_obs_flux = np.log(obs_flux)
-    #log_obs_flux_err = obs_flux_err / obs_flux
-    ### residuals = np.log(obs_flux / model_flux) / obs_flux_err 
-    #residuals = np.log(obs_flux / model_flux)
-    #residuals =  1- (obs_flux / model_flux) 
-    ## residuals = np.log(obs_flux / model_flux) / (obs_flux_err / obs_flux)
-    #residuals = np.log(obs_flux / model_flux) / np.log(obs_flux)
-    #residuals = np.log(obs_flux / model_flux) / np.log(obs_flux_err)
 
     # Residuals and chi2 term
-    residual = (model_flux / obs_flux) - 1
+    residual = 1 - (model_flux / obs_flux)
 
-    # Protect against zero or negative errors by flooring
-    #err_floor = 1e-20
-    #obs_flux_err = np.maximum(obs_flux_err, err_floor)
-
-    #chi2 = np.sum((residual / (obs_flux_err / obs_flux)) ** 2)
-    chi2 = np.sum((residual/err) ** 2)
+    chi2 = 0.5*np.sum((residual/err) ** 2)
 
     #logger.info(f"original residuals={residuals}")
     if args.use_band_weights:
         chi2 *= obs_weights
     #logger.info(f"weighted residuals={residuals}")
     #llh = -0.5 * np.sum(residuals**2)
-    llh = -0.5 * (chi2 + logdet)
+    llh = logdet - chi2 
     global maxllh
     if llh > maxllh:
         maxllh = llh
-        #params_str = ", ".join( f"{param}={cube[i]:.8f}" for i, param in enumerate(param_names)) 
+        #params_str = ", ".join( f"{param}={cube[i]:.8f}" for i, param in enumerate(param_names))
         #logger.info(f"Log-likelihood: {llh}, {params_str}, \nobs_flux={obs_flux}\n, model_flux={model_flux}")
     return llh
+
+def log_likelihood_2(cube, ndim, nparams):
+    params = {name: cube[i] for i, name in enumerate(param_names)}
+    for name in priors_uniform.keys():
+        if priors_uniform[name]["low"] == priors_uniform[name]["high"]:
+            params[name] = priors_uniform[name]["low"]
+    params['jetType'] = args.jetType
+    params['z'] = args.redshift
+
+    #if params["thv"]/params["thc"] > 1.5:
+        #return -np.inf
+    model_flux = model(obs_time, obs_nu, params)
+
+    log_obs_flux_err = obs_flux_err / obs_flux
+    residuals = np.log(obs_flux / model_flux) / log_obs_flux_err
+    llf = -0.5 * np.sum(residuals**2)
+    return llf
 
 ################################################
 
@@ -152,127 +168,26 @@ logger.info(f"Commandline: {' '.join(sys.argv)}")
 
 # setup for the params
 """
+Tophat:
 priors_uniform = {
-    "loge0": {"low": 47.0, "high": 53.0},
-    "logepsb": {"low": -6.0, "high": -1.0},
-    "logepse": {"low": -3.0, "high": -0.5},
-    "logn0": {"low": -4.0, "high": 0.0},
-    "thc": {"low": 0.01, "high": 0.5},  # radians
-    "thv": {"low": 0.01, "high": 0.8},  # radians
-    "p": {"low": 2.01, "high": 2.9},
-    "s": {"low": 5, "high": 8},
-    "lf": {"low": 50, "high": 500},
-    "A": {"low": 0.0, "high": 1.0},
-}
-2025-08-15 06:52:07,431 - INFO - loge0: {'low': 51, 'high': 55}
-2025-08-15 06:52:07,431 - INFO - logepsb: {'low': -4.0, 'high': -1.0}
-2025-08-15 06:52:07,431 - INFO - logepse: {'low': -1.5, 'high': 0}
-2025-08-15 06:52:07,431 - INFO - logn0: {'low': -3, 'high': 0}
-2025-08-15 06:52:07,431 - INFO - logthc: {'low': -1.25, 'high': -2.0}
-2025-08-15 06:52:07,431 - INFO - logthv: {'low': -0.5, 'high': -2.0}
-2025-08-15 06:52:07,431 - INFO - p: {'low': 2.0, 'high': 2.5}
-2025-08-15 06:52:07,431 - INFO - s: {'low': 6.5, 'high': 6.5}
-2025-08-15 06:52:07,431 - INFO - loglf: {'low': 7.1, 'high': 7.1}
-2025-08-15 06:52:07,431 - INFO - A: {'low': 0.0, 'high': 0.0}
-
-priors_uniform = {
-    "loge0": {"low": 45, "high": 55},
-    "logepsb": {"low": -2.0, "high": -2.0},
-    "logepse": {"low": -1.0, "high": -1.0},
-    "logn0": {"low": -4.0, "high": 1.0},
-    "logthc": {"low": -3, "high": -0.5},  # radians
-    "logthv": {"low": -3, "high": -0.5},  # radians
-    "p": {"low": 2.0, "high": 2.0},
-    "s": {"low": 6.0, "high": 6.0},      ## fix at 6.0
-    "loglf": {"low": 10.0, "high": 10.0},
-    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
-}
-"""
-"""
-#powerlaw
-priors_uniform = {
-    "loge0": {"low": 51.0, "high": 56, "prior_type": "uniform"},
-    "logepsb": {"low": -3.0, "high": -1.8, "prior_type": "uniform"},
-    "logepse": {"low": -1.4, "high": -0.6, "prior_type": "uniform"},
-    "logn0": {"low": -2.0, "high": -0.6, "prior_type": "uniform"},
-    #"ln0": {"low": -4.0, "high": 1.0, "prior_type": "uniform"},
-    "thc": {"low": 0.06, "high": 0.18, "prior_type": "uniform"},  # radians
-    "logthv": {"low": -2, "high": -1.0},
-    "p": {"low": 2.0961, "high": 2.0961, "prior_type": "uniform"},
-    "s": {"low": 2, "high": 5.5, "prior_type": "uniform"},
-    "loglf": {"low": 10, "high": 10},
-    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
-}
-
-priors_uniform = {
-    "loge0": {"low": 53, "high": 54.5, "prior_type": "uniform"},
-    "logepsb": {"low": -2.2441, "high": -2.2441, "prior_type": "uniform"},
-    "logepse": {"low": -1.0, "high": -1.0, "prior_type": "uniform"},
-    "logn0": {"low": -1.9076, "high": -1.9076, "prior_type": "uniform"},
-    "thc": {"low": 0.05, "high": 0.05, "prior_type": "log_uniform"},  # radians
-    "thv": {"low": 0.005, "high": 0.005, "prior_type": "log_uniform"},
-    "p": {"low": 2.2053, "high": 2.2053, "prior_type": "uniform"},
-    "s": {"low": 1, "high": 8, "prior_type": "uniform"},
-    "loglf": {"low": 3, "high": 3, "prior_type": "uniform"},
-    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
-}
-# tophat
-priors_uniform = {
-    "loge0": {"low": 53.75, "high": 53.75, "prior_type": "uniform"},
-    "logepsb": {"low": -5.0, "high": -1, "prior_type": "uniform"},
-    "logepse": {"low": -1.5, "high": -0.7, "prior_type": "uniform"},
-    "logn0": {"low": -1, "high": 0, "prior_type": "uniform"},
-    "thc": {"low": 0.065, "high": 0.065, "prior_type": "log_uniform"},  # radians
-    "thv": {"low": 0.0, "high": 0.09, "prior_type": "log_uniform"},
-    "p": {"low": 2.2, "high": 2.2, "prior_type": "uniform"},
-    "s": {"low": 4, "high": 4, "prior_type": "uniform"},
-    "loglf": {"low": 3, "high": 3, "prior_type": "uniform"},
-    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
-}
-#powerlaw
-priors_uniform = {
-    "loge0": {"low": 53.5, "high": 54.5, "prior_type": "uniform"},
-    "logepsb": {"low": -2.61, "high": -2.61, "prior_type": "uniform"},
-    "logepse": {"low": -1.16, "high": -1.16, "prior_type": "uniform"},
-    "logn0": {"low": -0.95, "high": -0.95, "prior_type": "uniform"},
-    "thc": {"low": 0.08, "high": 0.2, "prior_type": "log_uniform"},  # radians
-    "thv": {"low": 0.0, "high": 0.08, "prior_type": "log_uniform"},
-    "p": {"low": 2.2, "high": 2.2, "prior_type": "uniform"},
-    "s": {"low": 2, "high": 10, "prior_type": "uniform"},
-    "loglf": {"low": 1, "high": 10, "prior_type": "uniform"},
-    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
-}
-priors_uniform = {
-    "loge0": {"low": 53.75, "high": 53.75, "prior_type": "uniform"},
-    "logepsb": {"low": -5, "high": -1, "prior_type": "uniform"},
-    "logepse": {"low": -1.5, "high": -0.5, "prior_type": "uniform"},
-    "logn0": {"low": -2, "high": 0.0, "prior_type": "uniform"},
-    "thc": {"low": 0.08, "high": 0.3, "prior_type": "log_uniform"},  # radians
-    "thv": {"low": 0.0, "high": 0.1, "prior_type": "log_uniform"},
-    "p": {"low": 2.2, "high": 2.2, "prior_type": "uniform"},
-    "s": {"low": 4, "high": 4, "prior_type": "uniform"},
-    "loglf": {"low": 5, "high": 5, "prior_type": "uniform"},
-    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
-}
-priors_uniform = {
-    "loge0": {"low": 53, "high": 55},
-    "epsb": {"low": 1e-8, "high": 1e-1, "prior_type": "log_uniform"},
-    "epse": {"low": 0.01, "high": 0.2, "prior_type": "log_uniform"},
-    "n0": {"low": 1, "high": 1, "prior_type": "log_uniform"},
-    "thc": {"low": 0.001, "high": 0.1, "prior_type": "log_uniform"},  # radians
-    "thv": {"low": 0.001, "high": 0.1, "prior_type": "log_uniform"},  # radians
-    "p": {"low": 2.01, "high": 2.4, "prior_type": "log_uniform"},
-    "s": {"low": 1, "high": 8, "prior_type": "log_uniform"},
+    "loge0": {"low": 53, "high": 54},
+    "logepsb": {"low": -3, "high": -1.8},
+    "logepse": {"low": -1.3, "high": -0.8},
+    "logn0": {"low": -1.8, "high": 2.0},
+    "logthc": {"low": -3.0, "high": -0.5},  # radians
+    "logthv": {"low": -5, "high": -0.5},  # radians
+    "p": {"low": 2.01, "high": 2.2},
+    "s": {"low": 1, "high": 8},
     "loglf": {"low": 3.0, "high": 3.0},
     "A": {"low": 0.0, "high": 0.0},  ## fix at 0
 }
-"""
 
+#Powerlaw:
 priors_uniform = {
     "loge0": {"low": 53, "high": 55},
     "logepsb": {"low": -8, "high": -1},
     "logepse": {"low": -1.5, "high": -0.8},
-    "logn0": {"low": -0.8, "high": -0.8},
+    "logn0": {"low": -2.0, "high": 0.0},
     "logthc": {"low": -3.0, "high": -0.5},  # radians
     "logthv": {"low": -5, "high": -0.5},  # radians
     "p": {"low": 2.01, "high": 3.00},
@@ -280,6 +195,48 @@ priors_uniform = {
     "loglf": {"low": 3.0, "high": 3.0},
     "A": {"low": 0.0, "high": 0.0},  ## fix at 0
 }
+
+
+#gaussian
+priors_uniform = {
+    "loge0": {"low": 53, "high": 55},
+    "logepsb": {"low": -8, "high": -2},
+    "logepse": {"low": -1.5, "high": -0.8},
+    "logn0": {"low": -2.0, "high": 2.0},
+    "logthc": {"low": -3.0, "high": -0.5},  # radians
+    "logthv": {"low": -5, "high": -0.5},  # radians
+    "p": {"low": 2.01, "high": 2.2},
+    "s": {"low": 2, "high": 2},
+    "loglf": {"low": 3.0, "high": 3.0},
+    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
+}
+priors_uniform = {
+    "loge0": {"low": 53, "high": 55},
+    "logepsb": {"low": -8, "high": -1},
+    "logepse": {"low": -1.5, "high": -0.8},
+    "logn0": {"low": -2.0, "high": 0.0},
+    "logthc": {"low": -3.0, "high": -0.5},  # radians
+    "logthv": {"low": -5, "high": -0.5},  # radians
+    "p": {"low": 2.07, "high": 2.07},
+    "s": {"low": 2, "high": 2},
+    "loglf": {"low": 3.0, "high": 3.0},
+    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
+}
+"""
+
+priors_uniform = {
+    "loge0": {"low": 53, "high": 54},
+    "logepsb": {"low": -3, "high": -1.8},
+    "logepse": {"low": -1.3, "high": -0.8},
+    "logn0": {"low": -1.8, "high": 2.0},
+    "logthc": {"low": -3.0, "high": -0.5},  # radians
+    "logthv": {"low": -5, "high": -0.5},  # radians
+    "p": {"low": 2.01, "high": 2.2},
+    "s": {"low": 1, "high": 8},
+    "loglf": {"low": 3.0, "high": 3.0},
+    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
+}
+
 
 if args.jetType == 'tophat': 
     priors_uniform["s"]["low"]=0
@@ -315,6 +272,7 @@ if not args.post_process_only:
     obs_flux_err = data["FluxErrs"].to_numpy()  # in mJy
     # Log-determinant term
     err = obs_flux_err / obs_flux
+
     logdet = np.sum(np.log(2.0 * np.pi * err**2))
 
     obs_weights = np.ones(len(obs_flux))
@@ -329,8 +287,9 @@ if not args.post_process_only:
 
     logger.info(f"Observations file has {len(obs_flux)} records.")
     logger.info(f"Starting MultiNest run with {n_params} parameters: {param_names}.")
+    result = None
     try:
-        pymultinest.run(
+        result = pymultinest.run(
             log_likelihood,
             log_prior,
             n_params,
@@ -338,14 +297,14 @@ if not args.post_process_only:
             n_live_points=args.livepoints,
             sampling_efficiency=0.8,
             evidence_tolerance=0.3,
-            # importance_nested_sampling=False,
+            importance_nested_sampling=True,
             resume=False,
             verbose=True,
         )
+        logger.info(f"Finished MultiNest run. Process {rank}.")
     except Exception as e:
         logger.error(f'Caught exception in multicast run! {e}')
         raise
-    logger.info(f"Finished MultiNest run. Process {rank}")
 
 if rank != 0: sys.exit(0)
 if rank == 0: # Only one process does the analysis
@@ -356,11 +315,21 @@ if rank == 0: # Only one process does the analysis
 
 
     # Create an Analyzer object
-    a = analyse.Analyzer(n_params, outputfiles_basename=outputfiles_basename)
+    analyzer = analyse.Analyzer(n_params, outputfiles_basename=outputfiles_basename)
+
+    # Get the Bayesian evidence
+    #logZ = analyzer.get_log_evidence()        # ln(Z)
+    #logZ_err = analyzer.get_log_evidence_err()
+    stats = analyzer.get_stats()
+    logger.info(f"stats={stats}")
+    lnZ = stats['nested importance sampling global log-evidence']
+    lnZErr = stats['nested importance sampling global log-evidence error']
+    # calculate Bayesian Information Criterion (BIC) used for comparing models
+    bic = astropy.stats.bayesian_info_criterion(lnZ, n_params, 28)#len(obs_flux))
+    logger.info(f"lnZ={lnZ:.4f} lnZErr={lnZErr:.4f}, n_params={n_params:.4f}, num_obs=28, BIC={bic:.4f}")
 
     # Get the best-fit parameters (highest likelihood point)
-    bestfit_params = a.get_best_fit()
-
+    bestfit_params = analyzer.get_best_fit()
 
     # Print the best-fit parameters
     params_str = ", ".join(
@@ -372,17 +341,19 @@ if rank == 0: # Only one process does the analysis
 
     # corner plot
     logger.info("Making corner plot")
-    flat_samples = a.get_equal_weighted_posterior()[:, :-1]
+    flat_samples = analyzer.get_equal_weighted_posterior()[:, :-1]
     medians = np.median(flat_samples, axis=0)
 
     covariance = np.cov(flat_samples, rowvar=False)
     sigma = np.sqrt(np.diagonal(covariance))
     lower_bounds = medians - 3 * sigma
     upper_bounds = medians + 3 * sigma
+    relative_sigma = np.abs(sigma/medians)
     sig3_flat_samples = flat_samples[
         np.all((flat_samples >= lower_bounds) & (flat_samples <= upper_bounds), axis=1)
     ]
 
+    logger.info(f'Total flat samples from eq weighted posterior: {len(flat_samples)}, total sigma3 smaples: {len(sig3_flat_samples)}')
     # labels
     corner.corner(
         flat_samples,
@@ -428,18 +399,24 @@ if rank == 0: # Only one process does the analysis
     logger.info(format_dict_table(median_params, "Fixed parameters"))
     for i, value in enumerate(medians):
         median_params[param_names[i]] = value
-    logger.info(f'Inferred parameters: \n{format_parameters_table(median_params, priors_uniform)}')
+    rel_sigma_params = {}
+    for i, value in enumerate(relative_sigma):
+        rel_sigma_params[param_names[i]] = value
+    logger.info(f'Inferred parameters: \n{format_parameters_table(median_params, rel_sigma_params, priors_uniform)}')
 
     sig3_params = []
-    for i in np.random.randint(len(sig3_flat_samples), size=50):
-        sample = sig3_flat_samples[i]
+    #for i in np.random.randint(len(sig3_flat_samples), size=50):
+    #for sample in len(flat_samples):
+    for i in np.random.randint(len(flat_samples), size=100):
+        #sample = sig3_flat_samples[i]
+        sample = flat_samples[i]
         params = {}
         params['jetType']=args.jetType
         params['z']=args.redshift
         #params['logepse']=-1
         #params['loglf']=np.log10(200.0)
-        for i, value in enumerate(sample):
-            params[param_names[i]] = value
+        for j, value in enumerate(sample):
+            params[param_names[j]] = value
         for key, value in priors_uniform.items():
             if value["low"] == value["high"]:
                 params[key] = value["low"]
