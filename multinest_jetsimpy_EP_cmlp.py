@@ -6,6 +6,7 @@ import time
 import warnings
 
 import sys
+import re
 
 import jetsimpy
 import corner
@@ -122,6 +123,9 @@ def log_likelihood_2(cube, ndim, nparams):
     llf = -0.5 * np.sum(residuals**2)
     return llf
 
+def numbers_only_title(val, q, labels):
+    return f"{val:.3f}$^{{+{q[1]-val:.2f}}}_{{-{val-q[0]:.2f}}}$"
+
 ################################################
 
 comm = MPI.COMM_WORLD
@@ -223,20 +227,18 @@ priors_uniform = {
     "A": {"low": 0.0, "high": 0.0},  ## fix at 0
 }
 """
-
 priors_uniform = {
-    "loge0": {"low": 53, "high": 54},
-    "logepsb": {"low": -3, "high": -1.8},
-    "logepse": {"low": -1.3, "high": -0.8},
-    "logn0": {"low": -1.8, "high": 2.0},
+    "loge0": {"low": 53, "high": 55},
+    "logepsb": {"low": -8, "high": -1.0},
+    "logepse": {"low": -1.5, "high": -0.8},
+    "logn0": {"low": -2.0, "high": 0.0},
     "logthc": {"low": -3.0, "high": -0.5},  # radians
     "logthv": {"low": -5, "high": -0.5},  # radians
-    "p": {"low": 2.01, "high": 2.2},
-    "s": {"low": 1, "high": 8},
+    "p": {"low": 2.01, "high": 3.0},
+    "s": {"low": 2, "high": 2},
     "loglf": {"low": 3.0, "high": 3.0},
-    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
+    "logA": {"low": 0.0, "high": 0.0}, # 
 }
-
 
 if args.jetType == 'tophat': 
     priors_uniform["s"]["low"]=0
@@ -244,7 +246,8 @@ if args.jetType == 'tophat':
 param_names = [key for key in priors_uniform.keys() if priors_uniform[key]["low"] != priors_uniform[key]["high"]]
 #param_names = ["loge0", "logepsb", "s", "logn0", "thc", "thv", "p"]
 n_params = len(param_names)
-#param_names_greeks = [r"$\log_{10}(E_{K,iso})", r"$\log_{10}(\epsilon_{B})$",  r"$\log_{10}(\epsilon_{e})$", r"$\log_{10}(n0)$", r"$\theta_{c}$", r"$\theta_{v}$", r"$p$","$s$", r"$\Gamma_0$", r"$A$"]
+param_names_math = {"loge0":r"$\log_{10}(E_{K,iso})$", "logepsb":r"$\log_{10}(\epsilon_{B})$",  "logepse": r"$\log_{10}(\epsilon_{e})$", "logn0": r"$\log_{10}(n_0)$", "logthc": r"$\log_{10}(\theta_{c})$", "logthv": r"$\log_{10}(\theta_{v})$", "p":r"$p$", "s": r"$s$", "loglf": r"$\log_{10}(\Gamma_0)$", "logA": r"$\log_{10}(A)$", "k": r"$k$"}
+param_names_display = [param_names_math[p] for p in param_names]
 #param_names_greeks = [r"$\log_{10}(E_{K,iso})", r"$\log_{10}(\epsilon_{B})$",  r"$\log_{10}(\epsilon_{e})$", r"$\log_{10}(n0)$", r"$\theta_{c}$", r"$\theta_{v}$", r"$\Gamma_0$"]
 ## TODO
 param_names_greeks = [r"$\log_{10}(E_{K,iso})$",r"$\log_{10}(\epsilon_{B})$",  r"$\log_{10}(\epsilon_{e})$", r"$\theta_{c}$", r"$\theta_{v}$"]
@@ -354,20 +357,29 @@ if rank == 0: # Only one process does the analysis
     ]
 
     logger.info(f'Total flat samples from eq weighted posterior: {len(flat_samples)}, total sigma3 smaples: {len(sig3_flat_samples)}')
-    # labels
-    corner.corner(
+    # corner
+    fig = corner.corner(
         flat_samples,
-        labels=param_names,
+        labels=param_names_display,
         show_titles=True,
-        truths=medians,
         title_fmt=".2f",
-        title_kwargs={"fontsize": 12},
+        truths=medians,
+        title_kwargs={"fontsize": 24},
         # add smooth
         smooth=2,
         quantiles=[0.16, 0.5, 0.84],
-        label_kwargs={"fontsize": 12},
+        label_kwargs={"fontsize": 24},
         hist_kwargs={"density": True, "alpha": 0.5},
     )
+    # Hack to strip off the label from axis title
+    for ax in fig.axes:
+        title = ax.get_title()
+        if title:
+            t = ax.title
+            fontsize = t.get_fontsize()
+            title = re.sub(r".*?=\s*", "", title)
+            ax.set_title(title, fontsize=fontsize)
+
     # save the figure
     corner_plot_file = basedir + "/multinest_corner.pdf"
     logger.info(f"Saving corner plot: {corner_plot_file}")

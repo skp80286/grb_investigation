@@ -140,11 +140,11 @@ def model(obs_time, obs_nu, params):
 #'i': 8.0, 'u': 8.0, 'z': 16.0, 'J': 32.0, 
 #'radio(1.3GHz)': 100.0, 'radio(6GHz)': 400, 'radio(10GHz)': 1500, 'radio(15GHz)': 2000}
 multipliers = {'X-ray(10keV)': 10.0, 'g': 1.0, 'L': 2.0,'r': 4, 'i': 8.0, 'z': 16.0, 'J': 32.0, 'radio(10GHz)': 1500}
-filt_freqs={'i':393170436721311.5, 'z':328215960148894.2,
-    'VT_B':605000000000000.0, 'VT_R':381000000000000.0, 'r':481130569731985.2, 'J':240000000000000.0, 
-    'g':628495719077568.1,'R':468671768303359.2, 'L':5.5552E+14,
+filt_freqs={'i':3.92913E+14, 'z':328215960148894.2,
+    'VT_B':5.45077E+14, 'VT_R':3.63385E+14, 'r':4.81208E+14, 'J':2.40161E+14, 
+    'g':6.28496E+14,'R':4.67914E+14, 'L':5.55516E+14,
     'SAO-R':45562310000000, 'X-ray(10keV)': 2.42e+18, 'X-ray(1keV)': 2.42e+17,
-    'radio(1.3GHz)': 1.3e9, 'radio(6GHz)': 6e9, 'radio(10GHz)': 1e10, 'radio(15GHz)': 1.5e10, 'u': 865201898990000}
+    'radio(1.3GHz)': 1.3e9, 'radio(6GHz)': 6e9, 'radio(10GHz)': 1e10, 'radio(15GHz)': 1.5e10, 'u': 8.65202E+14}
 
 def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False, save_plot=True):
 
@@ -189,7 +189,7 @@ def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False,
         else: continue
         j += 1
 
-        Fnu_allobs = df_allobs[df_allobs['Filt']==band][['Times','Fluxes', 'FluxErrs']].sort_values(by='Times').to_numpy()
+        Fnu_allobs = df_allobs[df_allobs['Filt']==band and df_allobs['UL']=='N'][['Times','Fluxes', 'FluxErrs']].sort_values(by='Times').to_numpy()
         print(f'Plotting band={band}, {len(Fnu_allobs)} rows.')
 
         ax.errorbar(
@@ -200,6 +200,17 @@ def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False,
                 color=colors[j % len(colors)], mec='black',
                 elinewidth=0.5, capsize=2
         )
+
+        Fnu_ul_obs = df_allobs[df_allobs['Filt']==band and df_allobs['UL']=='Y'][['Times','Fluxes', 'FluxErrs']].sort_values(by='Times').to_numpy()
+        if len(Fnu_ul_obs) > 0:
+            print(f'Plotting upper limit band={band}, {len(Fnu_allobs)} rows.')
+
+            ax.scatter(
+                    Fnu_ul_obs[:,0], Fnu_ul_obs[:,1]*multiplier,
+                    marker='v',
+                    s=4, alpha=1,
+                    c=colors[j % len(colors)], mec='black'
+            )
 
     ax.tick_params(axis='both', which='both', direction='in', top=True, right=True)
 
