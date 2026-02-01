@@ -172,7 +172,7 @@ logger.info(f"Commandline: {' '.join(sys.argv)}")
 
 # setup for the params
 """
-Tophat:
+# Tophat
 priors_uniform = {
     "loge0": {"low": 53, "high": 54},
     "logepsb": {"low": -3, "high": -1.8},
@@ -181,63 +181,39 @@ priors_uniform = {
     "logthc": {"low": -3.0, "high": -0.5},  # radians
     "logthv": {"low": -5, "high": -0.5},  # radians
     "p": {"low": 2.01, "high": 2.2},
-    "s": {"low": 1, "high": 8},
+    "s": {"low": 2, "high": 2},
     "loglf": {"low": 3.0, "high": 3.0},
-    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
+    "logA": {"low": 0.0, "high": 0.0}, # 
 }
 
-#Powerlaw:
+# Powerlaw
 priors_uniform = {
     "loge0": {"low": 53, "high": 55},
     "logepsb": {"low": -8, "high": -1},
-    "logepse": {"low": -1.5, "high": -0.8},
-    "logn0": {"low": -2.0, "high": 0.0},
-    "logthc": {"low": -3.0, "high": -0.5},  # radians
-    "logthv": {"low": -5, "high": -0.5},  # radians
-    "p": {"low": 2.01, "high": 3.00},
-    "s": {"low": 1, "high": 8},
-    "loglf": {"low": 3.0, "high": 3.0},
-    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
-}
-
-
-#gaussian
-priors_uniform = {
-    "loge0": {"low": 53, "high": 55},
-    "logepsb": {"low": -8, "high": -2},
-    "logepse": {"low": -1.5, "high": -0.8},
-    "logn0": {"low": -2.0, "high": 2.0},
-    "logthc": {"low": -3.0, "high": -0.5},  # radians
-    "logthv": {"low": -5, "high": -0.5},  # radians
-    "p": {"low": 2.01, "high": 2.2},
-    "s": {"low": 2, "high": 2},
-    "loglf": {"low": 3.0, "high": 3.0},
-    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
-}
-priors_uniform = {
-    "loge0": {"low": 53, "high": 55},
-    "logepsb": {"low": -8, "high": -1},
-    "logepse": {"low": -1.5, "high": -0.8},
-    "logn0": {"low": -2.0, "high": 0.0},
-    "logthc": {"low": -3.0, "high": -0.5},  # radians
-    "logthv": {"low": -5, "high": -0.5},  # radians
-    "p": {"low": 2.07, "high": 2.07},
-    "s": {"low": 2, "high": 2},
-    "loglf": {"low": 3.0, "high": 3.0},
-    "A": {"low": 0.0, "high": 0.0},  ## fix at 0
-}
-"""
-priors_uniform = {
-    "loge0": {"low": 53, "high": 55},
-    "logepsb": {"low": -8, "high": -1.0},
     "logepse": {"low": -1.5, "high": -0.8},
     "logn0": {"low": -2.0, "high": 0.0},
     "logthc": {"low": -3.0, "high": -0.5},  # radians
     "logthv": {"low": -5, "high": -0.5},  # radians
     "p": {"low": 2.01, "high": 3.0},
-    "s": {"low": 2, "high": 2},
+    "s": {"low": 1, "high": 8},
     "loglf": {"low": 3.0, "high": 3.0},
     "logA": {"low": 0.0, "high": 0.0}, # 
+}
+
+"""
+
+priors_uniform = {
+    "loge0": {"low": 53, "high": 55},
+    "logepsb": {"low": -8, "high": -1},
+    "logepse": {"low": -1.5, "high": -0.8},
+    "logn0": {"low": -2.0, "high": 0.0},
+    "logthc": {"low": -3.0, "high": -0.5},  # radians
+    "logthv": {"low": -5, "high": -0.5},  # radians
+    "p": {"low": 2.01, "high": 3.0},
+    "s": {"low": 1, "high": 8},
+    "loglf": {"low": 2.63, "high": 2.63},
+    "logA": {"low": 0.0, "high": 0.0}, #
+
 }
 
 if args.jetType == 'tophat': 
@@ -369,6 +345,7 @@ if rank == 0: # Only one process does the analysis
         smooth=2,
         quantiles=[0.16, 0.5, 0.84],
         label_kwargs={"fontsize": 24},
+        labelpad=0.1,
         hist_kwargs={"density": True, "alpha": 0.5},
     )
     # Hack to strip off the label from axis title
@@ -379,6 +356,7 @@ if rank == 0: # Only one process does the analysis
             fontsize = t.get_fontsize()
             title = re.sub(r".*?=\s*", "", title)
             ax.set_title(title, fontsize=fontsize)
+        ax.tick_params(axis='both', labelsize=16) 
 
     # save the figure
     corner_plot_file = basedir + "/multinest_corner.pdf"

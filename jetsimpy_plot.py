@@ -52,6 +52,8 @@ from jsonargparse import ArgumentParser
 
 ######################
 
+logger = logging.getLogger(__name__)
+
 def model(obs_time, obs_nu, params):
     #print(f'obs_time={obs_time},\nobs_nu={obs_nu},\nparams={params},\nz={z}')
     dl = cosmo.luminosity_distance(params['z']).to("Mpc").value
@@ -139,78 +141,137 @@ def model(obs_time, obs_nu, params):
 #multipliers = {'X-ray(1keV)': 10.0, 'X-ray(10keV)': 100.0, 'g': 1.0, 'L': 1, 'R': 1,'r': 1, 
 #'i': 8.0, 'u': 8.0, 'z': 16.0, 'J': 32.0, 
 #'radio(1.3GHz)': 100.0, 'radio(6GHz)': 400, 'radio(10GHz)': 1500, 'radio(15GHz)': 2000}
-multipliers = {'X-ray(10keV)': 10.0, 'g': 1.0, 'L': 2.0,'r': 4, 'i': 8.0, 'z': 16.0, 'J': 32.0, 'radio(10GHz)': 1500}
+multipliers = {
+    'X-ray(10keV)': 16, 
+    'u': 1,
+    'VT_B': 2, 
+    'g': 4, 
+    'r': 8, 
+    'i': 16, 
+    'VT_R': 32, 
+    'R': 64,
+    'J': 128, 
+    'radio(15.5GHz)': 1024
+}
+
 filt_freqs={'i':3.92913E+14, 'z':328215960148894.2,
     'VT_B':5.45077E+14, 'VT_R':3.63385E+14, 'r':4.81208E+14, 'J':2.40161E+14, 
     'g':6.28496E+14,'R':4.67914E+14, 'L':5.55516E+14,
     'SAO-R':45562310000000, 'X-ray(10keV)': 2.42e+18, 'X-ray(1keV)': 2.42e+17,
-    'radio(1.3GHz)': 1.3e9, 'radio(6GHz)': 6e9, 'radio(10GHz)': 1e10, 'radio(15GHz)': 1.5e10, 'u': 8.65202E+14}
+    'radio(1.3GHz)': 1.3e9, 'radio(6GHz)': 6e9, 'radio(10GHz)': 1e10, 
+    'radio(15GHz)': 1.5e10, 'radio(15.5GHz)': 1.55e10,'u': 8.65202E+14}
+
+# cmap = matplotlib.colormaps.get_cmap('rainbow_r')  # or 'plasma', 'cividis', 'magma'
+# colors = cmap(np.linspace(0, 1, len(filt_freqs)))
+
+#colors=['tab:purple', 'darkgreen', 'tab:red', 'darkgoldenrod', 'olive', 'royalblue', '#580F41', 'orange', 'cyan']
+band_colors={
+    'X-ray(10keV)': 'tab:purple', 
+    'u': 'darkgreen',
+    'VT_B': '#580F41', 
+    'g': 'royalblue', 
+    'r': 'red', 
+    'i': 'orange', 
+    'VT_R': 'tab:purple', 
+    'R': 'darkgreen',
+    'J': '#580F41', 
+    'radio(15.5GHz)': 'cyan'
+}
+"""
+    band_colors = {
+        "radio(15.5GHz)": "#4B0082",  # deep purple
+        "L": "#5A0000",               # very dark red (near-IR, long λ)
+        "J": "#8B0000",               # dark red / near-IR
+        "z": "#A00000",               # deep maroon
+        "R": "#E41A1C",               # red
+        "VT_R": "#FF7F00",            # orange-red
+        "i": "#D95F02",               # amber
+        "r": "#4DAF4A",               # green
+        "g": "#00A6D6",               # cyan
+        "VT_B": "#377EB8",            # blue
+        "u": "#984EA3",               # violet / near-UV
+        "X-ray(10keV)": "#000000"     # black (extreme high-energy)
+    }
+"""
 
 def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False, save_plot=True):
-
     # Time and Frequencies
     ta = 1.0e4
     tb = 3.0e6
     t = np.geomspace(ta, tb, num=100)
 
     df_allobs = pd.read_csv(observed_data)
-    df_fit = None
+    # Convert numeric columns to numeric types, handling invalid values
+    df_allobs['Times'] = pd.to_numeric(df_allobs['Times'], errors='coerce')
+    df_allobs['Fluxes'] = pd.to_numeric(df_allobs['Fluxes'], errors='coerce')
+    df_allobs['FluxErrs'] = pd.to_numeric(df_allobs['FluxErrs'], errors='coerce')
+    logger.info(f"lc_plot: len(median_params)={len(median_params)}, len(sig3_parmas)={len(sig3_params)}, len(df_allobs)={len(df_allobs)}")
 
     fig, ax = plt.subplots(1, 1, figsize=(8, 5))
-    # cmap = matplotlib.colormaps.get_cmap('rainbow_r')  # or 'plasma', 'cividis', 'magma'
-    # colors = cmap(np.linspace(0, 1, len(filt_freqs)))
-
-    colors=['tab:purple', 'darkgreen', 'tab:red', 'darkgoldenrod', 'olive', 'royalblue', '#580F41', 'orange', 'cyan']
 
     # plot the model curves - expected lightcurve from jetsimpy
     j = -1
-    for i, (band,nu) in enumerate(filt_freqs.items()):
+    for i, (band,nu) in enumerate(sorted(filt_freqs.items(), key=lambda x: -x[1])):
         if band in multipliers: multiplier = multipliers[band]
         else: continue
         j += 1
-        #print(f"Calculating for frequency: {nu}")
+        logger.info(f"Calculating for frequency: {nu}")
         Fnu_model = []
 
         Fnu_model = model(t, [nu], median_params)
-        #print(f'Fnu_model: {Fnu_model}')
+        #logger.info(f'Fnu_model: {Fnu_model}')
         Fnu_model = np.array(Fnu_model)
-        #print(f'Fnu_model.shape: {Fnu_model.shape}')
+        #logger.info(f'Fnu_model.shape: {Fnu_model.shape}')
 
-        ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, label=f'{band} x {multiplier}', color=colors[j % len(colors)])
+        ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, label=f'{band} x {multiplier}', color=band_colors.get(band, "#000000"))
         for params in sig3_params:
             Fnu_model = np.array(model(t, [nu], params))
-            ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, color=colors[j % len(colors)], alpha=0.1)
+            ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, color=band_colors.get(band, "#000000"), alpha=0.1)
 
 
     # plot the actual observations
     j = -1
-    for i, (band,nu) in enumerate(filt_freqs.items()):
+    for i, (band,nu) in enumerate(sorted(filt_freqs.items(), key=lambda x: -x[1])):
         if band in multipliers: multiplier = multipliers[band]
         else: continue
         j += 1
 
-        Fnu_allobs = df_allobs[df_allobs['Filt']==band and df_allobs['UL']=='N'][['Times','Fluxes', 'FluxErrs']].sort_values(by='Times').to_numpy()
-        print(f'Plotting band={band}, {len(Fnu_allobs)} rows.')
+        Fnu_allobs = df_allobs[(df_allobs['Filt']==band) & (df_allobs['UL']=='N')][['Times','Fluxes', 'FluxErrs']].sort_values(by='Times').to_numpy()
+        logger.info(f'Plotting band={band}, {len(Fnu_allobs)} rows, err={Fnu_allobs[:,2]}.')
 
         ax.errorbar(
                 Fnu_allobs[:,0], Fnu_allobs[:,1]*multiplier,
                 yerr=Fnu_allobs[:,2]*multiplier,
                 fmt='o',
                 markersize=4, alpha=1,
-                color=colors[j % len(colors)], mec='black',
+                color=band_colors.get(band, "#000000"), mec='black',
                 elinewidth=0.5, capsize=2
         )
 
-        Fnu_ul_obs = df_allobs[df_allobs['Filt']==band and df_allobs['UL']=='Y'][['Times','Fluxes', 'FluxErrs']].sort_values(by='Times').to_numpy()
+        Fnu_ul_obs = df_allobs[(df_allobs['Filt']==band) & (df_allobs['UL']=='Y')][['Times','Fluxes', 'FluxErrs']].sort_values(by='Times').to_numpy()
         if len(Fnu_ul_obs) > 0:
-            print(f'Plotting upper limit band={band}, {len(Fnu_allobs)} rows.')
+            logger.info(f'Plotting upper limit band={band}, {len(Fnu_ul_obs)} rows.')
 
+            """
             ax.scatter(
                     Fnu_ul_obs[:,0], Fnu_ul_obs[:,1]*multiplier,
                     marker='v',
                     s=4, alpha=1,
-                    c=colors[j % len(colors)], mec='black'
+                    c=colors[j % len(colors)], 
+                    edgecolors='black', 
             )
+            """
+
+            # Plot upper limits with arrows pointing down
+            plt.errorbar(
+                Fnu_ul_obs[:,0], Fnu_ul_obs[:,1]*multiplier,
+                yerr=None,
+                fmt='v',
+                markersize=6, alpha=1,
+                color=band_colors.get(band, "#000000"), mec='black',
+                elinewidth=0.5, capsize=2, uplims=True
+            )
+
 
     ax.tick_params(axis='both', which='both', direction='in', top=True, right=True)
 
@@ -312,7 +373,6 @@ def main():
             logging.StreamHandler()
         ]
     )
-    logger = logging.getLogger(__name__)
 
     logger.info(f"Commandline: {' '.join(sys.argv)}")
 
