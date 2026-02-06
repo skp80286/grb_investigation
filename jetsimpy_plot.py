@@ -37,10 +37,12 @@ import warnings
 import sys
 
 import jetsimpy
-import matplotlib
-
-matplotlib.use("Agg")
+import matplotlib as mpl
+mpl.use("Agg")
 import matplotlib.pyplot as plt
+import scienceplots
+
+
 import numpy as np
 import pandas as pd
 from astropy.cosmology import Planck15 as cosmo
@@ -142,14 +144,14 @@ def model(obs_time, obs_nu, params):
 #'i': 8.0, 'u': 8.0, 'z': 16.0, 'J': 32.0, 
 #'radio(1.3GHz)': 100.0, 'radio(6GHz)': 400, 'radio(10GHz)': 1500, 'radio(15GHz)': 2000}
 multipliers = {
-    'X-ray(10keV)': 16, 
+    'X-ray(10keV)': 32, 
     'u': 1,
-    'VT_B': 2, 
-    'g': 4, 
+    'g': 2, 
+    'VT_B': 4, 
     'r': 8, 
-    'i': 16, 
-    'VT_R': 32, 
-    'R': 64,
+    'R': 16,
+    'i': 32, 
+    'VT_R': 64, 
     'J': 128, 
     'radio(15.5GHz)': 1024
 }
@@ -166,17 +168,30 @@ filt_freqs={'i':3.92913E+14, 'z':328215960148894.2,
 
 #colors=['tab:purple', 'darkgreen', 'tab:red', 'darkgoldenrod', 'olive', 'royalblue', '#580F41', 'orange', 'cyan']
 band_colors={
-    'X-ray(10keV)': 'tab:purple', 
-    'u': 'darkgreen',
-    'VT_B': '#580F41', 
-    'g': 'royalblue', 
-    'r': 'red', 
-    'i': 'orange', 
-    'VT_R': 'tab:purple', 
-    'R': 'darkgreen',
-    'J': '#580F41', 
-    'radio(15.5GHz)': 'cyan'
+    'X-ray(10keV)': 'darkviolet', 
+    'u': 'teal',
+    'VT_B': 'royalblue', 
+    'g': 'darkgreen', 
+    'r': 'tab:red', 
+    'i': 'darkgoldenrod', 
+    'VT_R': 'orange', 
+    'R': 'magenta',
+    'J': 'olive', 
+    'radio(15.5GHz)': 'deepskyblue'
 }
+band_secondary_colors={
+    'X-ray(10keV)': 'lavender', 
+    'u': 'mediumturquoise',
+    'VT_B': 'lightsteelblue', 
+    'g': 'mediumaquamarine', 
+    'r': 'lightcoral', 
+    'i': 'khaki', 
+    'VT_R': 'peachpuff', 
+    'R': 'plum',
+    'J': 'olive', 
+    'radio(15.5GHz)': 'lightblue'
+}
+
 """
     band_colors = {
         "radio(15.5GHz)": "#4B0082",  # deep purple
@@ -195,6 +210,30 @@ band_colors={
 """
 
 def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False, save_plot=True):
+    plt.style.use(['science', 'high-vis'])
+
+    mpl.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial", "Helvetica"],
+        "font.size": 5,  # minimum allowed by Nature
+        "axes.titlesize": 12,
+        "axes.labelsize": 12,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "legend.fontsize": 12,
+        "pdf.fonttype": 42,  # embed fonts as TrueType
+        "ps.fonttype": 42,
+        # "figure.dpi": 300,  # ensure high-res bitmap export when needed
+        "savefig.dpi": 300,
+        "axes.linewidth": 0.5,
+        "lines.linewidth": 0.75,
+        "xtick.major.width": 0.5,
+        "ytick.major.width": 0.5,
+        "xtick.minor.width": 0.3,
+        "ytick.minor.width": 0.3,
+
+    })
+    
     # Time and Frequencies
     ta = 1.0e4
     tb = 3.0e6
@@ -223,10 +262,10 @@ def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False,
         Fnu_model = np.array(Fnu_model)
         #logger.info(f'Fnu_model.shape: {Fnu_model.shape}')
 
-        ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, label=f'{band} x {multiplier}', color=band_colors.get(band, "#000000"))
         for params in sig3_params:
             Fnu_model = np.array(model(t, [nu], params))
-            ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, color=band_colors.get(band, "#000000"), alpha=0.1)
+            ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, linestyle='-', color=band_secondary_colors.get(band, "#000000"), alpha=0.1)
+        ax.plot(t, Fnu_model*multiplier,  linewidth=1.0, linestyle='-', label=f'{band} x {multiplier}', color=band_colors.get(band, "#000000"), alpha=1)
 
 
     # plot the actual observations
@@ -278,6 +317,7 @@ def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False,
     ax.set_xscale('log')
     ax.set_yscale('log')
     ax.set_ylim(1e-9,1e5)
+    ax.set_xlim(1e4,3e6)
     ax.set_xlabel(r'$t$ (s)')
     ax.set_ylabel(r'$F_\nu$ (mJy)')
     ax.grid(True, which='both', linestyle='--', alpha=0.3)
@@ -306,7 +346,7 @@ def lc_plot(basedir, median_params, sig3_params, observed_data, show_plot=False,
     # Add textbox with all Z dictionary values
     ax.text(0.98, 0.02, z_text, transform=ax.transAxes,
             bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.5, edgecolor='none'),
-            verticalalignment='bottom', horizontalalignment='right', fontsize=10, fontfamily='monospace')
+            verticalalignment='bottom', horizontalalignment='right', fontsize=12)
 
     #marker_text = "*  Observations used for fitting\nx  All observations\nDashed lines show the best fit"
     #ax.text(0.2, 0.02, marker_text, transform=ax.transAxes,
