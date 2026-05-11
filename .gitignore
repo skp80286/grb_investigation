@@ -185,7 +185,5 @@ cython_debug/
 .DS_Store
 /output
 *.swp
-.DS_Store
-.DS_Store
-.DS_Store
+.DS_Store/
 summary.csv
