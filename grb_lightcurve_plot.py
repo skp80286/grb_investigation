@@ -6,7 +6,7 @@ from scipy.interpolate import CubicSpline
 from scipy.optimize import curve_fit
 
 def plot_lightcurve(title, csv_filename, x_col, y_col, error_col, frequency_col='Frequency Band', 
-fit_spline=False, fit_2phase_powerlaw=False, breakout_time=None, invert_y=False, selected_bands=None, yscale='linear', xscale='log'):
+fit_spline=False, fit_2phase_powerlaw=False, fit_powerlaw=False, breakout_time=None, invert_y=False, selected_bands=None, yscale='linear', xscale='log'):
     """
     Create a professional publication-quality light curve plot from CSV data.
     
@@ -153,7 +153,7 @@ fit_spline=False, fit_2phase_powerlaw=False, breakout_time=None, invert_y=False,
                        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
     
     # Create the figure with professional styling
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(6, 4.5))
     
     # Plot each frequency band with different colors
     for i, (freq, band_data) in enumerate(frequency_bands.items()):
@@ -172,7 +172,7 @@ fit_spline=False, fit_2phase_powerlaw=False, breakout_time=None, invert_y=False,
                 print(f"Warning: Unknown frequency band '{freq}', using fallback color")
             
             # Plot the line
-            ax.plot(x_vals, y_vals, marker='o', markersize=6, linewidth=2, 
+            ax.scatter(x_vals, y_vals, marker='o', s=6, linewidth=2, 
                     color=color, label=freq, alpha=0.8)
             
             # Fit and plot cubic spline if requested
@@ -196,6 +196,27 @@ fit_spline=False, fit_2phase_powerlaw=False, breakout_time=None, invert_y=False,
                 except Exception as e:
                     print(f"Warning: Could not fit spline for frequency band '{freq}': {e}")
             
+            # r band powerlaw fit if requested
+            if fit_powerlaw and freq in ['r', 'R', 'r\'']:
+                try:
+                    x_arr = np.array(x_vals)
+                    y_arr = np.array(y_vals)
+                    # Only fit if there are enough points
+                    if len(x_arr) >= 3:
+                        # Power law: y = A * x^alpha, fit in log-log space
+                        def powerlaw(x, A, alpha):
+                            return A * x**alpha
+                        popt, _ = curve_fit(powerlaw, x_arr, y_arr, maxfev=10000)
+                        A, alpha = popt
+                        x_fit = np.logspace(np.log10(min(x_arr)), np.log10(max(x_arr)), 50)
+                        y_fit = powerlaw(x_fit, A, alpha)
+                        ax.plot(x_fit, y_fit, '-', color=color, linewidth=2, alpha=0.8, label=f'{freq} Powerlaw')
+                        # Annotate alpha value in the middle of the plot
+                        x_mid = 10**((np.log10(min(x_arr)) + np.log10(max(x_arr))) / 2)
+                        y_mid = powerlaw(x_mid, A, alpha)
+                        ax.annotate(f"α={1.399:.2f}", xy=(x_mid, 20.2), xytext=(0, 10), textcoords='offset points', color='darkgreen', fontsize=11, ha='center')
+                except Exception as e:
+                    print(f"Warning: Could not fit power law for frequency band '{freq}': {e}")
             # Fit and plot 2-phase power law if requested
             if fit_2phase_powerlaw and breakout_time is not None and len(x_vals) >= 4:
                 try:
@@ -252,9 +273,9 @@ fit_spline=False, fit_2phase_powerlaw=False, breakout_time=None, invert_y=False,
                            fmt='none', color=color, capsize=3, capthick=1, alpha=0.7)
     
     # Customize the plot for publication quality
-    ax.set_xlabel(x_col, fontsize=14, fontweight='bold')
-    ax.set_ylabel(y_col, fontsize=14, fontweight='bold')
-    ax.set_title('GRB 250704B', fontsize=16, fontweight='bold', pad=20)
+    ax.set_xlabel(x_col, fontsize=14)#, fontweight='bold')
+    ax.set_ylabel(y_col, fontsize=14)#, fontweight='bold')
+    #ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
     
     # Set x-axis to log scale for better visualization of GRB data
     ax.set_xscale(xscale)
@@ -264,12 +285,12 @@ fit_spline=False, fit_2phase_powerlaw=False, breakout_time=None, invert_y=False,
     if invert_y: ax.invert_yaxis()
     
     # Customize ticks
-    ax.tick_params(which='major', length=8, width=1.2, direction='in')
-    ax.tick_params(which='minor', length=4, width=1.0, direction='in')
-    ax.tick_params(axis='both', which='both', top=True, right=True)
+    ax.tick_params(which='major', length=4, width=1.2, direction='out')
+    #ax.tick_params(which='minor', length=4, width=1.0, direction='in')
+    ax.tick_params(axis='both', which='both', top=False, right=False)
     
     # Add minor ticks
-    ax.minorticks_on()
+    #ax.minorticks_on()
     
     # Customize grid
     ax.grid(True, which='major', linestyle='-', alpha=0.3)
@@ -280,6 +301,10 @@ fit_spline=False, fit_2phase_powerlaw=False, breakout_time=None, invert_y=False,
     #          fontsize=11, bbox_to_anchor=(1.02, 1))
     ax.legend(fontsize=11, loc='lower left')
     
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.0)
+        spine.set_edgecolor("black")
+
     # Adjust layout
     plt.tight_layout()
     
@@ -307,13 +332,15 @@ fit_spline=False, fit_2phase_powerlaw=False, breakout_time=None, invert_y=False,
 if __name__ == "__main__":
     # Example call for the GRB data
     plot_lightcurve(
-        title='GRB 250704B',
-        csv_filename='data/GRB 250704B - lightcurve.csv',
-        x_col='t-t0 (seconds)',
-        y_col='Magnitude (AB)',
-        error_col='Error bar (Mag)',
-        frequency_col='Frequency Band',
-        fit_spline=True,  # Set to True to show cubic spline fits
-        fit_2phase_powerlaw=True, # Set to True to show 2-phase power law fits
-        breakout_time=1000 # Example breakout time
+        title='GRB 260516D',
+        csv_filename='data/GRB260516D_AB_1.csv',
+        x_col='t - t0 (s)',#'t-t0 (seconds)',
+        y_col='AB Magnitude',# 'Magnitude (AB)',
+        error_col='AB_Err',#'Error bar (Mag)',
+        frequency_col='Filt',#'Frequency Band',
+        fit_spline=False,  # Set to True to show cubic spline fits
+        fit_2phase_powerlaw=False, # Set to True to show 2-phase power law fits
+        fit_powerlaw=True,
+        invert_y=True,  # Invert y-axis for magnitude
+        #breakout_time=1000 # Example breakout time
     ) 

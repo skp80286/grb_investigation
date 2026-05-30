@@ -37,6 +37,7 @@ from jetsimpy_plot import (
     spectrum_plot,
 )
 from print_params import format_parameters_table, format_dict_table
+from priors import priors_map, priors_generic
 
 from mpi4py import MPI
 
@@ -126,7 +127,11 @@ def log_likelihood(cube, ndim, nparams):
     params["jetType"] = args.jetType
     params["z"] = args.redshift
 
-    model_flux = model(obs_time, obs_nu, params_for_jetsimpy_model(params))
+    try:
+        model_flux = model(obs_time, obs_nu, params_for_jetsimpy_model(params))
+    except Exception as e:
+        logger.debug("log_likelihood: model failed (%s); returning penalty llh", e)
+        return -1e100
 
     # Residuals and chi2 term
     residual = 1 - (model_flux / obs_flux)
@@ -220,6 +225,13 @@ parser.add_argument(
     ),
 )
 
+parser.add_argument(
+    "--priors",
+    type=str,
+    default="generic",
+    help="Priors set to use (e.g. 'generic', 'dirty_fireball' or 'structured_offaxis')",
+)
+
 args = parser.parse_args()
 
 np.random.seed(12)
@@ -300,24 +312,27 @@ priors_uniform = {
 2026-04-25 06:12:13,509 - INFO - logthc: {'low': -3.0, 'high': -0.5}
 2026-04-25 06:12:13,509 - INFO - logA: {'low': 0.0, 'high': 0.0}
 
-"""
-
-priors_uniform = {
-    "loge0": {"low": 50, "high": 55},
-    "logepsb": {"low": -8, "high": -1},
-    "logepse": {"low": -2, "high": -0.5},
-    "logn0": {"low": -3.0, "high": 0.0},
-    "logthc": {"low": -3.0, "high": -0.5},  # radians
+priors_uniform_dirty_fb = {
+    "loge0": {"low": 48, "high": 55},
+    "logepsb": {"low": -2, "high": -2},
+    "logepse": {"low": -1.5, "high": -0.5},
+    "logn0": {"low": -6.0, "high": 0.0},
+    "logthc": {"low": -1.0, "high": 0},  # radians
     "logthv": {"low": -5, "high": -0.5},  # radians; omitted when --use-ksi
     "logksi": {
-        "low": -2.0,
-        "high": 2.0,
+        "low": 0.0,
+        "high": 1,
     },  # log10(theta_v/theta_c); only sampled with --use-ksi
     "p": {"low": 2.01, "high": 3.0},
     "s": {"low": 1, "high": 8},
-    "loglf": {"low": 1, "high": 10},
+    "loglf": {"low": 6, "high": 6},
     "logA": {"low": 0.0, "high": 0.0},  #
 }
+
+"""
+
+# Select priors based on command-line argument. Default to generic if unknown.
+priors_uniform = priors_map.get(args.priors, priors_generic)
 
 if args.use_ksi:
     priors_uniform.pop("logthv", None)
@@ -449,9 +464,17 @@ if rank == 0:  # Only one process does the analysis
     lnZ = stats["nested importance sampling global log-evidence"]
     lnZErr = stats["nested importance sampling global log-evidence error"]
     # calculate Bayesian Information Criterion (BIC) used for comparing models
-    bic = astropy.stats.bayesian_info_criterion(lnZ, n_params, 28)  # len(obs_flux))
+    # Determine number of observations: use obs_flux if available, otherwise count CSV lines
+    
+    try:
+        num_obs = len(pd.read_csv(args.obsfile)) - 1
+    except Exception:
+        num_obs = 1
+        logger.warning(f"obs_flux was None or empty; using line count from CSV: num_obs={num_obs}")
+
+    bic = astropy.stats.bayesian_info_criterion(lnZ, n_params, num_obs)
     logger.info(
-        f"lnZ={lnZ:.4f} lnZErr={lnZErr:.4f}, n_params={n_params:.4f}, num_obs=28, BIC={bic:.4f}"
+        f"lnZ={lnZ:.4f} lnZErr={lnZErr:.4f}, n_params={n_params:.4f}, num_obs={num_obs}, BIC={bic:.4f}"
     )
 
     # Get the best-fit parameters (highest likelihood point)

@@ -54,6 +54,7 @@ from scipy.optimize import curve_fit, minimize, newton
 import logging
 import argparse
 from jsonargparse import ArgumentParser
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ######################
 
@@ -75,6 +76,23 @@ _PAPER_SERIF_RC = {
     ],
     "mathtext.fontset": "dejavuserif",
 }
+
+
+def _normalize_ul_column(df):
+    """
+    Ensure 'UL' column exists and blank/NaN values are treated as 'N'.
+    Creates 'UL' column with all 'N' values if it doesn't exist.
+    Fills blank and NaN values with 'N'.
+    Mutates df in place and returns it.
+    """
+    if "UL" not in df.columns:
+        df["UL"] = "N"
+    else:
+        # Replace NaN and empty strings with "N"
+        df["UL"] = df["UL"].fillna("N")
+        df["UL"] = df["UL"].astype(str).str.strip()
+        df.loc[df["UL"] == "", "UL"] = "N"
+    return df
 
 
 def _expand_jetsimpy_params_inplace(params):
@@ -177,7 +195,14 @@ multipliers = {
     "r'": 8,
     "i'": 32,
     "z'": 32,
-    "6GHz": 64,
+    # "6GHz": 64,
+    "radio(1.3GHz)": 100,
+    "radio(3GHz)": 10,
+    "radio(6GHz)": 50,
+    "radio(10GHz)": 100,
+    "radio(15.5GHz)": 200,
+    "radio(75GHz)": 300,
+    "radio(90GHz)": 400,
 }
 
 filt_freqs = {
@@ -197,15 +222,16 @@ filt_freqs = {
     "u": 8.1178e14,
     "SAO-R": 4.556231e13,
     "X-ray(10keV)": 2.41799e18,
-    "X-ray(1keV)": 2.41799e17,
-    # "radio(1.3GHz)": 1.3e9,
-    # "radio(6GHz)": 6e9,
-    # "6GHz": 6e9,
-    # "radio(10GHz)": 1e10,
-    # "radio(15GHz)": 1.5e10,
-    # "radio(15.5GHz)": 1.55e10,
-    # "radio(75GHz)": 7.5e10,
-    # "radio(90GHz)": 9e10,
+    #"X-ray(1keV)": 2.41799e17,
+    "radio(1.3GHz)": 1.3e9,
+    "radio(3GHz)": 3e9,
+    "radio(6GHz)": 6e9,
+    #"6GHz": 6e9,
+    "radio(10GHz)": 1e10,
+    "radio(15GHz)": 1.5e10,
+    "radio(15.5GHz)": 1.55e10,
+    "radio(75GHz)": 7.5e10,
+    "radio(90GHz)": 9e10,
 }
 
 # cmap = matplotlib.colormaps.get_cmap('rainbow_r')  # or 'plasma', 'cividis', 'magma'
@@ -228,7 +254,15 @@ band_colors = {
     "VT_R": "orange",
     "R": "magenta",
     "J": "olive",
-    "radio(15.5GHz)": "deepskyblue",
+    "radio(1.3GHz)": "deepskyblue",
+    "radio(3GHz)": "cornflowerblue",
+    "radio(6GHz)": "navy",
+    "radio(10GHz)": "#562778",
+    "radio(15GHz)": "#441E5F",
+    "radio(15.5GHz)": "#562778",
+    "radio(75GHz)": "#29123A",
+    "radio(90GHz)": "#9141CA",
+
 }
 band_secondary_colors = {
     "X-ray(10keV)": "lavender",
@@ -245,7 +279,14 @@ band_secondary_colors = {
     "VT_R": "peachpuff",
     "R": "plum",
     "J": "olive",
-    "radio(15.5GHz)": "lightblue",
+    "radio(1.3GHz)": "lightblue",
+    "radio(3GHz)": "cornflowerblue",
+    "radio(6GHz)": "blue",
+    "radio(10GHz)": "#5F3E77",
+    "radio(15GHz)": "#4D385C",
+    "radio(15.5GHz)": "#644877",
+    "radio(75GHz)": "#372842",
+    "radio(90GHz)": "#A97BCA",
 }
 
 """
@@ -294,8 +335,8 @@ def lc_plot(
     )
 
     # Time and Frequencies
-    ta = 1.0e4
-    tb = 9.0e6
+    ta = 1.0e3
+    tb = 1.0e7
     t = np.geomspace(ta, tb, num=100)
 
     df_allobs = pd.read_csv(observed_data)
@@ -303,12 +344,57 @@ def lc_plot(
     df_allobs["Times"] = pd.to_numeric(df_allobs["Times"], errors="coerce")
     df_allobs["Fluxes"] = pd.to_numeric(df_allobs["Fluxes"], errors="coerce")
     df_allobs["FluxErrs"] = pd.to_numeric(df_allobs["FluxErrs"], errors="coerce")
+    # Normalize UL column: treat missing/blank as "N"
+    df_allobs = _normalize_ul_column(df_allobs)
     available_bands = (
         set(df_allobs["Filt"].dropna()) if "Filt" in df_allobs.columns else set()
     )
     logger.info(
         f"lc_plot: len(median_params)={len(median_params)}, len(sig3_parmas)={len(sig3_params)}, len(df_allobs)={len(df_allobs)}"
     )
+
+    # Precompute model fluxes for each band and for median + sig3 samples in parallel
+    bands_to_compute = [
+        (band, nu)
+        for band, nu in sorted(filt_freqs.items(), key=lambda x: -x[1])
+        if band in multipliers
+    ]
+
+    precomputed = {}  # keys: (band, 'median') or (band, idx)
+    max_workers = min(32, (os.cpu_count() or 1) * 4)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {}
+        for band, nu in bands_to_compute:
+            future = executor.submit(model, t, [nu], median_params)
+            future_map[future] = (band, "median")
+            for i, params in enumerate(sig3_params):
+                future = executor.submit(model, t, [nu], params)
+                future_map[future] = (band, i)
+
+        for fut in as_completed(future_map):
+            band, tag = future_map[fut]
+            try:
+                res = np.array(fut.result())
+            except Exception as e:
+                logger.error(f"model failed during precompute for band {band}: {e}")
+                res = None
+            precomputed[(band, tag)] = res
+
+    # Print fluxes at selected observer times in days for each band.
+    flux_times_days = [1, 2, 4, 8, 16]
+    flux_times_seconds = [d * 86400.0 for d in flux_times_days]
+    logger.info("band,frequency_hz,time_days,time_seconds,flux_mjy")
+    for band, nu in sorted(filt_freqs.items(), key=lambda x: -x[1]):
+        if band not in multipliers:
+            continue
+        try:
+            flux_values = model(flux_times_seconds, [nu], median_params)
+            flux_values = np.array(flux_values).flatten()
+        except Exception as e:
+            logger.error(f"model failed for band {band} at selected times: {e}")
+            continue
+        for day, sec, flux in zip(flux_times_days, flux_times_seconds, flux_values):
+            logger.info(f"{band},{nu},{day},{sec},{flux}")
 
     fig, ax = plt.subplots(1, 1, figsize=(8, 5))
 
@@ -320,33 +406,43 @@ def lc_plot(
         else:
             continue
         j += 1
+
         logger.info(f"Calculating for frequency: {nu}")
         Fnu_model = []
+        # Retrieve precomputed median result
+        try:
+            Fnu_model = precomputed.get((band, "median"))
+            if Fnu_model is None:
+                raise RuntimeError("No precomputed median model for band")
 
-        Fnu_model = model(t, [nu], median_params)
-        # logger.info(f'Fnu_model: {Fnu_model}')
-        Fnu_model = np.array(Fnu_model)
-        # logger.info(f'Fnu_model.shape: {Fnu_model.shape}')
+            # plot sig3 samples (if any)
+            for idx in range(len(sig3_params)):
+                Fnu_sig3 = precomputed.get((band, idx))
+                if Fnu_sig3 is None:
+                    logger.debug(f"Missing precomputed sig3 for band={band}, idx={idx}")
+                    continue
+                ax.plot(
+                    t,
+                    Fnu_sig3 * multiplier,
+                    linewidth=1.0,
+                    linestyle="-",
+                    color=band_secondary_colors.get(band, "#C5C6C7"),
+                    alpha=0.2,
+                )
 
-        for params in sig3_params:
-            Fnu_model = np.array(model(t, [nu], params))
             ax.plot(
                 t,
                 Fnu_model * multiplier,
                 linewidth=1.0,
                 linestyle="-",
-                color=band_secondary_colors.get(band, "#000000"),
-                alpha=0.2,
+                label=f"{band} x {multiplier}",
+                color=band_colors.get(band, "#616569"),
+                alpha=1,
             )
-        ax.plot(
-            t,
-            Fnu_model * multiplier,
-            linewidth=1.0,
-            linestyle="-",
-            label=f"{band} x {multiplier}",
-            color=band_colors.get(band, "#000000"),
-            alpha=1,
-        )
+        except Exception as e:
+            logger.error(f"model failed for band {band}; {e}")
+            return -1e100
+
 
     # plot the actual observations
     j = -1
@@ -381,7 +477,7 @@ def lc_plot(
             fmt="o",
             markersize=4,
             alpha=1,
-            color=band_colors.get(band, "#000000"),
+            color=band_colors.get(band, "#616569"),
             mec="black",
             elinewidth=0.5,
             capsize=2,
@@ -415,19 +511,22 @@ def lc_plot(
                 fmt="v",
                 markersize=6,
                 alpha=1,
-                color=band_colors.get(band, "#000000"),
+                color=band_colors.get(band, "#616569"),
                 mec="black",
                 elinewidth=0.5,
                 capsize=2,
                 uplims=True,
             )
 
+    ax.minorticks_on()
     ax.tick_params(axis="both", which="both", direction="in", top=True, right=True)
+    ax.tick_params(axis="y", which="minor", length=3, width=0.5)
+    ax.tick_params(axis="x", which="minor", length=3, width=0.5)
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_ylim(1e-6, 1e3)
-    ax.set_xlim(1e4, 1e6)
+    ax.set_ylim(1e-9, 1e3)
+    ax.set_xlim(1e3, 1e7)
     ax.set_xlabel(r"$t$ (s)")
     ax.set_ylabel(r"$F_\nu$ (mJy)")
     ax.grid(True, which="both", linestyle="--", alpha=0.3)
@@ -435,11 +534,11 @@ def lc_plot(
     # Create text content with all Z dictionary values
     z_text = ""
     for key, value in median_params.items():
-        if key in ["specType", "z", "E0", "A"]:
+        if key in ["specType", "z", "E0"]:
             continue
             # Skip function objects, just show the key
             # z_text += f"{key}: {type(value).__name__}\n"
-        elif key == "s" and value == 0:
+        elif (key == "s" and value == 0) or (key == "logA" and value == 0):
             continue
         else:
             z_text += "\n"
@@ -507,7 +606,8 @@ SPECTRUM_PLOT_TIME_EPOCHS = np.array(
         1e4,
         # 31500.0,
         # 32600.0,
-        38500.0,
+        # 38500.0,
+        35244.0,
         # 42300.0,
         # 82900.0,
         # 118500.0,
@@ -533,8 +633,9 @@ def build_spectrum_epoch_observations(df_allobs, epochs, dt_sec=500.0):
     for col in ("Times", "Freqs", "Fluxes", "FluxErrs"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    if "UL" in df.columns:
-        df = df[df["UL"].astype(str) == "N"]
+    # Normalize UL column: treat missing/blank as "N"
+    df = _normalize_ul_column(df)
+    df = df[df["UL"].astype(str) == "N"]
     if "Freqs" not in df.columns:
         return [[] for _ in np.asarray(epochs, dtype=float)]
 
@@ -1007,6 +1108,8 @@ def residual_plot(
     df_allobs["Times"] = pd.to_numeric(df_allobs["Times"], errors="coerce")
     df_allobs["Fluxes"] = pd.to_numeric(df_allobs["Fluxes"], errors="coerce")
     df_allobs["FluxErrs"] = pd.to_numeric(df_allobs["FluxErrs"], errors="coerce")
+    # Normalize UL column: treat missing/blank as "N"
+    df_allobs = _normalize_ul_column(df_allobs)
 
     det = df_allobs[(df_allobs["Filt"] == filt) & (df_allobs["UL"] == "N")][
         ["Times", "Fluxes", "FluxErrs"]
@@ -1045,7 +1148,7 @@ def residual_plot(
         fmt="o",
         markersize=4,
         alpha=1,
-        color=band_colors.get(filt, "#000000"),
+        color=band_colors.get(filt, "#616569"),
         mec="black",
         elinewidth=0.5,
         capsize=2,
@@ -1054,7 +1157,7 @@ def residual_plot(
 
     ax.tick_params(axis="both", which="both", direction="in", top=True, right=True)
     ax.set_xscale("log")
-    ax.set_xlim(1e4, 1e7)
+    ax.set_xlim(1e3, 1e6)
     ax.set_xlabel(r"$t$ (s)")
     ax.set_ylabel(r"$(F_\mathrm{obs} - F_\mathrm{model}) / F_\mathrm{model}$")
     ax.set_title(f"Residuals: {filt} (×{multiplier} in LC plot)")
