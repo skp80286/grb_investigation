@@ -54,7 +54,6 @@ from scipy.optimize import curve_fit, minimize, newton
 import logging
 import argparse
 from jsonargparse import ArgumentParser
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ######################
 
@@ -76,23 +75,6 @@ _PAPER_SERIF_RC = {
     ],
     "mathtext.fontset": "dejavuserif",
 }
-
-
-def _normalize_ul_column(df):
-    """
-    Ensure 'UL' column exists and blank/NaN values are treated as 'N'.
-    Creates 'UL' column with all 'N' values if it doesn't exist.
-    Fills blank and NaN values with 'N'.
-    Mutates df in place and returns it.
-    """
-    if "UL" not in df.columns:
-        df["UL"] = "N"
-    else:
-        # Replace NaN and empty strings with "N"
-        df["UL"] = df["UL"].fillna("N")
-        df["UL"] = df["UL"].astype(str).str.strip()
-        df.loc[df["UL"] == "", "UL"] = "N"
-    return df
 
 
 def _expand_jetsimpy_params_inplace(params):
@@ -188,45 +170,44 @@ multipliers = {
     "X-ray(10keV)": 32,
     "u": 1,
     "g": 2,
-    "VT_B": 4,
     "r": 8,
-    "R": 16,
     "i": 32,
+    "z": 32,
+    "g'": 2,
+    "r'": 8,
+    "i'": 32,
     "z'": 32,
-    "VT_R": 64,
-    "J": 128,
     # "6GHz": 64,
-    # "radio(1.3GHz)": 10,
-    # "radio(3GHz)": 25,
-    # "radio(6GHz)": 50,
-    # "radio(10GHz)": 100,
-    "radio(15.5GHz)": 1024,
-    # "radio(75GHz)": 300,
-    # "radio(90GHz)": 500,
+    "radio(3GHz)": 112,
+    "radio(6GHz)": 96,
+    "radio(10GHz)": 80,
+    "radio(15.5GHz)": 64,
+    "radio(75GHz)": 48,
+    "radio(90GHz)": 32,
 }
 
 filt_freqs = {
-    # "i'": 3.843e14,
+    "i'": 3.843e14,
     "i": 3.98913e14,
-    # "z'": 3.225e14,
+    "z'": 3.225e14,
     "z": 3.46e14,
     "VT_B": 5.45077e14,
-    # "VT_R": 3.63385e14,
-    # "r'": 4.732e14,
+    "VT_R": 3.63385e14,
+    "r'": 4.732e14,
     "r": 4.8384e14,
     "J": 2.40161e14,
-    # "g'": 6.087e14,
+    "g'": 6.087e14,
     "g": 6.249e14,
-    # "R": 4.67914e14,
+    "R": 4.67914e14,
     "L": 5.55516e14,
     "u": 8.1178e14,
-    # "SAO-R": 4.556231e13,
+    "SAO-R": 4.556231e13,
     "X-ray(10keV)": 2.41799e18,
-    # "X-ray(1keV)": 2.41799e17,
+    "X-ray(1keV)": 2.41799e17,
     "radio(1.3GHz)": 1.3e9,
     "radio(3GHz)": 3e9,
     "radio(6GHz)": 6e9,
-    # "6GHz": 6e9,
+    "6GHz": 6e9,
     "radio(10GHz)": 1e10,
     "radio(15GHz)": 1.5e10,
     "radio(15.5GHz)": 1.55e10,
@@ -254,16 +235,8 @@ band_colors = {
     "VT_R": "orange",
     "R": "magenta",
     "J": "olive",
-    "radio(1.3GHz)": "darkgreen",
-    "radio(3GHz)": "cornflowerblue",
-    "radio(6GHz)": "peru",
-    "radio(10GHz)": "#562778",
-    "radio(15GHz)": "#441E5F",
-    "radio(15.5GHz)": "deepskyblue",
-    "radio(75GHz)": "olive",
-    "radio(90GHz)": "#9141CA",
+    "radio(75GHz)": "deepskyblue",
 }
-
 band_secondary_colors = {
     "X-ray(10keV)": "lavender",
     "u": "mediumturquoise",
@@ -279,14 +252,7 @@ band_secondary_colors = {
     "VT_R": "peachpuff",
     "R": "plum",
     "J": "olive",
-    "radio(1.3GHz)": "mediumaquamarine",
-    "radio(3GHz)": "cornflowerblue",
-    "radio(6GHz)": "peachpuff",
-    "radio(10GHz)": "#5F3E77",
-    "radio(15GHz)": "#4D385C",
-    "radio(15.5GHz)": "lightblue",
-    "radio(75GHz)": "tan",
-    "radio(90GHz)": "#A97BCA",
+    "radio(75GHz)": "lightblue",
 }
 
 """
@@ -308,13 +274,7 @@ band_secondary_colors = {
 
 
 def lc_plot(
-    basedir,
-    median_params,
-    sig3_params,
-    observed_data,
-    show_plot=False,
-    save_plot=True,
-    hide_z_text=False,
+    basedir, median_params, sig3_params, observed_data, show_plot=False, save_plot=True
 ):
     plt.style.use(["science", "high-vis"])
 
@@ -341,8 +301,8 @@ def lc_plot(
     )
 
     # Time and Frequencies
-    ta = 1.0e3
-    tb = 1.0e7
+    ta = 1.0e4
+    tb = 9.0e6
     t = np.geomspace(ta, tb, num=100)
 
     df_allobs = pd.read_csv(observed_data)
@@ -350,57 +310,12 @@ def lc_plot(
     df_allobs["Times"] = pd.to_numeric(df_allobs["Times"], errors="coerce")
     df_allobs["Fluxes"] = pd.to_numeric(df_allobs["Fluxes"], errors="coerce")
     df_allobs["FluxErrs"] = pd.to_numeric(df_allobs["FluxErrs"], errors="coerce")
-    # Normalize UL column: treat missing/blank as "N"
-    df_allobs = _normalize_ul_column(df_allobs)
     available_bands = (
         set(df_allobs["Filt"].dropna()) if "Filt" in df_allobs.columns else set()
     )
     logger.info(
         f"lc_plot: len(median_params)={len(median_params)}, len(sig3_parmas)={len(sig3_params)}, len(df_allobs)={len(df_allobs)}"
     )
-
-    # Precompute model fluxes for each band and for median + sig3 samples in parallel
-    bands_to_compute = [
-        (band, nu)
-        for band, nu in sorted(filt_freqs.items(), key=lambda x: -x[1])
-        if band in multipliers
-    ]
-
-    precomputed = {}  # keys: (band, 'median') or (band, idx)
-    max_workers = min(32, (os.cpu_count() or 1) * 4)
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_map = {}
-        for band, nu in bands_to_compute:
-            future = executor.submit(model, t, [nu], median_params)
-            future_map[future] = (band, "median")
-            for i, params in enumerate(sig3_params):
-                future = executor.submit(model, t, [nu], params)
-                future_map[future] = (band, i)
-
-        for fut in as_completed(future_map):
-            band, tag = future_map[fut]
-            try:
-                res = np.array(fut.result())
-            except Exception as e:
-                logger.error(f"model failed during precompute for band {band}: {e}")
-                res = None
-            precomputed[(band, tag)] = res
-
-    # Print fluxes at selected observer times in days for each band.
-    flux_times_days = [1, 2, 4, 8, 16]
-    flux_times_seconds = [d * 86400.0 for d in flux_times_days]
-    logger.info("band,frequency_hz,time_days,time_seconds,flux_mjy")
-    for band, nu in sorted(filt_freqs.items(), key=lambda x: -x[1]):
-        if band not in multipliers:
-            continue
-        try:
-            flux_values = model(flux_times_seconds, [nu], median_params)
-            flux_values = np.array(flux_values).flatten()
-        except Exception as e:
-            logger.error(f"model failed for band {band} at selected times: {e}")
-            continue
-        for day, sec, flux in zip(flux_times_days, flux_times_seconds, flux_values):
-            logger.info(f"{band},{nu},{day},{sec},{flux}")
 
     fig, ax = plt.subplots(1, 1, figsize=(8, 5))
 
@@ -412,42 +327,33 @@ def lc_plot(
         else:
             continue
         j += 1
-
         logger.info(f"Calculating for frequency: {nu}")
         Fnu_model = []
-        # Retrieve precomputed median result
-        try:
-            Fnu_model = precomputed.get((band, "median"))
-            if Fnu_model is None:
-                raise RuntimeError("No precomputed median model for band")
 
-            # plot sig3 samples (if any)
-            for idx in range(len(sig3_params)):
-                Fnu_sig3 = precomputed.get((band, idx))
-                if Fnu_sig3 is None:
-                    logger.debug(f"Missing precomputed sig3 for band={band}, idx={idx}")
-                    continue
-                ax.plot(
-                    t,
-                    Fnu_sig3 * multiplier,
-                    linewidth=1.0,
-                    linestyle="-",
-                    color=band_secondary_colors.get(band, "#C5C6C7"),
-                    alpha=0.2,
-                )
+        Fnu_model = model(t, [nu], median_params)
+        # logger.info(f'Fnu_model: {Fnu_model}')
+        Fnu_model = np.array(Fnu_model)
+        # logger.info(f'Fnu_model.shape: {Fnu_model.shape}')
 
+        for params in sig3_params:
+            Fnu_model = np.array(model(t, [nu], params))
             ax.plot(
                 t,
                 Fnu_model * multiplier,
                 linewidth=1.0,
                 linestyle="-",
-                label=f"{band} x {multiplier}",
-                color=band_colors.get(band, "#616569"),
-                alpha=1,
+                color=band_secondary_colors.get(band, "#C5C6C7"),
+                alpha=0.2,
             )
-        except Exception as e:
-            logger.error(f"model failed for band {band}; {e}")
-            return -1e100
+        ax.plot(
+            t,
+            Fnu_model * multiplier,
+            linewidth=1.0,
+            linestyle="-",
+            label=f"{band} x {multiplier}",
+            color=band_colors.get(band, "#616569"),
+            alpha=1,
+        )
 
     # plot the actual observations
     j = -1
@@ -468,25 +374,25 @@ def lc_plot(
             .sort_values(by="Times")
             .to_numpy()
         )
-        if len(Fnu_allobs) > 0:
-            # logger.info(f"Skipping detections for band={band}; no UL='N' rows.")
-            # continue
-            logger.info(
-                f"Plotting band={band}, {len(Fnu_allobs)} rows, err={Fnu_allobs[:, 2]}."
-            )
+        if len(Fnu_allobs) == 0:
+            logger.info(f"Skipping detections for band={band}; no UL='N' rows.")
+            continue
+        logger.info(
+            f"Plotting band={band}, {len(Fnu_allobs)} rows, err={Fnu_allobs[:, 2]}."
+        )
 
-            ax.errorbar(
-                Fnu_allobs[:, 0],
-                Fnu_allobs[:, 1] * multiplier,
-                yerr=Fnu_allobs[:, 2] * multiplier,
-                fmt="o",
-                markersize=4,
-                alpha=1,
-                color=band_colors.get(band, "#616569"),
-                mec="black",
-                elinewidth=0.5,
-                capsize=2,
-            )
+        ax.errorbar(
+            Fnu_allobs[:, 0],
+            Fnu_allobs[:, 1] * multiplier,
+            yerr=Fnu_allobs[:, 2] * multiplier,
+            fmt="o",
+            markersize=4,
+            alpha=1,
+            color=band_colors.get(band, "#616569"),
+            mec="black",
+            elinewidth=0.5,
+            capsize=2,
+        )
 
         Fnu_ul_obs = (
             df_allobs[(df_allobs["Filt"] == band) & (df_allobs["UL"] == "Y")][
@@ -523,15 +429,12 @@ def lc_plot(
                 uplims=True,
             )
 
-    ax.minorticks_on()
     ax.tick_params(axis="both", which="both", direction="in", top=True, right=True)
-    ax.tick_params(axis="y", which="minor", length=3, width=0.5)
-    ax.tick_params(axis="x", which="minor", length=3, width=0.5)
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_ylim(1e-9, 1e5)
-    ax.set_xlim(1e4, 3e6)
+    ax.set_ylim(1e-6, 1e3)
+    ax.set_xlim(1e4, 1e7)
     ax.set_xlabel(r"$t$ (s)")
     ax.set_ylabel(r"$F_\nu$ (mJy)")
     ax.grid(True, which="both", linestyle="--", alpha=0.3)
@@ -539,11 +442,11 @@ def lc_plot(
     # Create text content with all Z dictionary values
     z_text = ""
     for key, value in median_params.items():
-        if key in ["specType", "z", "E0"]:
+        if key in ["specType", "z", "E0", "A"]:
             continue
             # Skip function objects, just show the key
             # z_text += f"{key}: {type(value).__name__}\n"
-        elif (key == "s" and value == 0) or (key == "logA" and value == 0):
+        elif key == "s" and value == 0:
             continue
         else:
             z_text += "\n"
@@ -559,20 +462,19 @@ def lc_plot(
             else:
                 z_text += f"{key}: {value}"
 
-    if not hide_z_text:
-        # Add textbox with all Z dictionary values
-        ax.text(
-            0.98,
-            0.02,
-            z_text,
-            transform=ax.transAxes,
-            bbox=dict(
-                boxstyle="round,pad=0.5", facecolor="white", alpha=0.5, edgecolor="none"
-            ),
-            verticalalignment="bottom",
-            horizontalalignment="right",
-            fontsize=12,
-        )
+    # Add textbox with all Z dictionary values
+    ax.text(
+        0.98,
+        0.02,
+        z_text,
+        transform=ax.transAxes,
+        bbox=dict(
+            boxstyle="round,pad=0.5", facecolor="white", alpha=0.5, edgecolor="none"
+        ),
+        verticalalignment="bottom",
+        horizontalalignment="right",
+        fontsize=12,
+    )
 
     # marker_text = "*  Observations used for fitting\nx  All observations\nDashed lines show the best fit"
     # ax.text(0.2, 0.02, marker_text, transform=ax.transAxes,
@@ -612,8 +514,7 @@ SPECTRUM_PLOT_TIME_EPOCHS = np.array(
         1e4,
         # 31500.0,
         # 32600.0,
-        # 38500.0,
-        35244.0,
+        38500.0,
         # 42300.0,
         # 82900.0,
         # 118500.0,
@@ -639,9 +540,8 @@ def build_spectrum_epoch_observations(df_allobs, epochs, dt_sec=500.0):
     for col in ("Times", "Freqs", "Fluxes", "FluxErrs"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    # Normalize UL column: treat missing/blank as "N"
-    df = _normalize_ul_column(df)
-    df = df[df["UL"].astype(str) == "N"]
+    if "UL" in df.columns:
+        df = df[df["UL"].astype(str) == "N"]
     if "Freqs" not in df.columns:
         return [[] for _ in np.asarray(epochs, dtype=float)]
 
@@ -1114,8 +1014,6 @@ def residual_plot(
     df_allobs["Times"] = pd.to_numeric(df_allobs["Times"], errors="coerce")
     df_allobs["Fluxes"] = pd.to_numeric(df_allobs["Fluxes"], errors="coerce")
     df_allobs["FluxErrs"] = pd.to_numeric(df_allobs["FluxErrs"], errors="coerce")
-    # Normalize UL column: treat missing/blank as "N"
-    df_allobs = _normalize_ul_column(df_allobs)
 
     det = df_allobs[(df_allobs["Filt"] == filt) & (df_allobs["UL"] == "N")][
         ["Times", "Fluxes", "FluxErrs"]
@@ -1163,7 +1061,7 @@ def residual_plot(
 
     ax.tick_params(axis="both", which="both", direction="in", top=True, right=True)
     ax.set_xscale("log")
-    ax.set_xlim(1e3, 1e6)
+    ax.set_xlim(1e4, 1e7)
     ax.set_xlabel(r"$t$ (s)")
     ax.set_ylabel(r"$(F_\mathrm{obs} - F_\mathrm{model}) / F_\mathrm{model}$")
     ax.set_title(f"Residuals: {filt} (×{multiplier} in LC plot)")

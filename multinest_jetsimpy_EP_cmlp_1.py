@@ -1,11 +1,3 @@
-"""
-Multinest script for Jetsimpy EP model with CMLP priors.
-Sample command: mpirun -n 15 --oversubscribe python multinest_jetsimpy_EP_cmlp.py \
-    --jetType tophat -z 0.36 --livepoints 200 --fullobsfile data/GRB230812B_modeling_v2.csv \
-        --plot-spectrum --plot-break-frequencies --plot-spectrum --priors 230812B \
-            --label v2theirs3 --obsfile data/GRB230812B_modeling_v2_theirs.csv
-"""
-
 import json
 import os
 import random
@@ -34,8 +26,6 @@ from scipy.optimize import curve_fit, minimize, newton
 import logging
 import argparse
 import requests
-import sys
-import warnings
 
 from jetsimpy_plot import (
     SPECTRUM_PLOT_TIME_EPOCHS,
@@ -47,7 +37,6 @@ from jetsimpy_plot import (
     spectrum_plot,
 )
 from print_params import format_parameters_table, format_dict_table
-from priors import priors_map, priors_generic
 
 from mpi4py import MPI
 
@@ -145,26 +134,8 @@ def log_likelihood(cube, ndim, nparams):
 
     # Residuals and chi2 term
     residual = 1 - (model_flux / obs_flux)
-    if np.any(obs_ul):
-        # For upper limits: very high residual if model exceeds limit, else zero
-        residual[obs_ul] = np.where(
-            model_flux[obs_ul] > obs_flux[obs_ul],
-            1e10,  # Infinite penalty if model exceeds the upper limit
-            0.0,  # Zero penalty if model respects the limit
-        )
 
-    try:
-        chi2_terms = 0.5 * (residual / err) ** 2
-    except RuntimeWarning as e:
-        print("Residual min/max:", np.nanmin(residual), np.nanmax(residual))
-        print("Err min/max:", np.nanmin(err), np.nanmax(err))
-        print("Ratio min/max:", np.nanmin(ratio), np.nanmax(ratio))
-        print("Any inf residual:", np.isinf(residual).any())
-        print("Any inf err:", np.isinf(err).any())
-
-        warnings.filterwarnings("error", category=RuntimeWarning)
-        print(f"Fatal RuntimeWarning: {e}")
-        sys.exit(1)
+    chi2_terms = 0.5 * (residual / err) ** 2
 
     if args.use_band_weights or args.equal_band_weights:
         chi2_terms *= obs_weights
@@ -252,24 +223,16 @@ parser.add_argument(
         "type is tophat, otherwise inferred from Jet.Flux synchrotron spectra)."
     ),
 )
-
 parser.add_argument(
-    "--priors",
-    type=str,
-    default="generic",
-    help="Priors set to use (e.g. 'generic', 'dirty_fireball' or 'structured_offaxis')",
-)
-
-parser.add_argument(
-    "--use_ul",
+    "--model-median-r-band-lum-half-day",
     action="store_true",
-    help="Consider upper-limit (UL) rows in the likelihood (default: False)",
+    help=(
+        "If set, only compute and print the model r-band luminosity at 0.5 day using "
+        "the median inferred parameters, then exit. This is for quick checks without "
+        "running the full corner and light-curve plotting."
+    ),
 )
-parser.add_argument(
-    "--hide-z-text",
-    action="store_true",
-    help="Omit the textbox listing fitted parameter values on the light-curve plot.",
-)
+
 args = parser.parse_args()
 
 np.random.seed(12)
@@ -350,27 +313,24 @@ priors_uniform = {
 2026-04-25 06:12:13,509 - INFO - logthc: {'low': -3.0, 'high': -0.5}
 2026-04-25 06:12:13,509 - INFO - logA: {'low': 0.0, 'high': 0.0}
 
-priors_uniform_dirty_fb = {
-    "loge0": {"low": 48, "high": 55},
-    "logepsb": {"low": -2, "high": -2},
-    "logepse": {"low": -1.5, "high": -0.5},
+"""
+
+priors_uniform = {
+    "loge0": {"low": 50, "high": 55},
+    "logepsb": {"low": -8, "high": -1},
+    "logepse": {"low": -2, "high": -0.5},
     "logn0": {"low": -6.0, "high": 0.0},
-    "logthc": {"low": -1.0, "high": 0},  # radians
+    "logthc": {"low": -3.0, "high": -0.5},  # radians
     "logthv": {"low": -5, "high": -0.5},  # radians; omitted when --use-ksi
     "logksi": {
-        "low": 0.0,
-        "high": 1,
+        "low": -3.0,
+        "high": 0.2,
     },  # log10(theta_v/theta_c); only sampled with --use-ksi
     "p": {"low": 2.01, "high": 3.0},
     "s": {"low": 1, "high": 8},
-    "loglf": {"low": 6, "high": 6},
+    "loglf": {"low": 1, "high": 10},
     "logA": {"low": 0.0, "high": 0.0},  #
 }
-
-"""
-
-# Select priors based on command-line argument. Default to generic if unknown.
-priors_uniform = priors_map.get(args.priors, priors_generic)
 
 if args.use_ksi:
     priors_uniform.pop("logthv", None)
@@ -432,38 +392,13 @@ if not args.post_process_only:
     data = data[data["Fluxes"] > 0]  # taking detections only
     if len(data) == 0:
         logger.error("len of the input data is zero")
-
     obs_time = data["Times"].to_numpy()  # time in seconds
     obs_nu = data["Freqs"].to_numpy()  # in Hz
     obs_flux = data["Fluxes"].to_numpy()  # in mJy
     obs_flux_err = data["FluxErrs"].to_numpy()  # in mJy
-
-    if "UL" in data.columns:
-        obs_ul = (
-            data["UL"]
-            .astype(str)
-            .str.strip()
-            .str.upper()
-            .isin({"Y", "YES", "TRUE", "T", "1"})
-            .to_numpy()
-        )
-    else:
-        obs_ul = np.zeros(len(obs_flux), dtype=bool)
-
-    # Only consider upper limits in likelihood if requested via CLI
-    if not args.use_ul:
-        obs_ul = np.zeros(len(obs_flux), dtype=bool)
-        logger.info(
-            "Upper limits present in file but will be ignored (use --use_ul to enable)."
-        )
-    else:
-        logger.info(
-            "Considering upper limits in likelihood as requested (--use_ul set)."
-        )
-
     # Log-determinant term
-    err = np.where(obs_flux > 0, obs_flux_err / obs_flux, np.inf)
-    err = np.where(err <= 0, np.finfo(float).tiny, err)
+    err = obs_flux_err / obs_flux
+
     logdet = np.sum(np.log(2.0 * np.pi * err**2))
 
     obs_weights = np.ones(len(obs_flux), dtype=float)
@@ -487,14 +422,6 @@ if not args.post_process_only:
 
     maxllh = -1e6
 
-    obs_table = data[["Times", "Filt", "Fluxes"]].rename(
-        columns={"Times": "time_s", "Filt": "band", "Fluxes": "flux_mJy"}
-    )
-    logger.info(
-        "Observations table (%d total):\n%s",
-        len(obs_table),
-        obs_table.to_string(index=False, float_format=lambda x: f"{x:.4g}"),
-    )
     logger.info(f"Observations file has {len(obs_flux)} records.")
     logger.info(f"Starting MultiNest run with {n_params} parameters: {param_names}.")
     result = None
@@ -536,14 +463,12 @@ if rank == 0:  # Only one process does the analysis
     lnZErr = stats["nested importance sampling global log-evidence error"]
     # calculate Bayesian Information Criterion (BIC) used for comparing models
     # Determine number of observations: use obs_flux if available, otherwise count CSV lines
-
+    
     try:
         num_obs = len(pd.read_csv(args.obsfile)) - 1
     except Exception:
         num_obs = 1
-        logger.warning(
-            f"obs_flux was None or empty; using line count from CSV: num_obs={num_obs}"
-        )
+        logger.warning(f"obs_flux was None or empty; using line count from CSV: num_obs={num_obs}")
 
     bic = astropy.stats.bayesian_info_criterion(lnZ, n_params, num_obs)
     logger.info(
@@ -580,6 +505,7 @@ if rank == 0:  # Only one process does the analysis
     logger.info(
         f"Total flat samples from eq weighted posterior: {len(flat_samples)}, total sigma3 smaples: {len(sig3_flat_samples)}"
     )
+
     # corner
     fig = corner.corner(
         flat_samples,
@@ -643,6 +569,8 @@ if rank == 0:  # Only one process does the analysis
         f"Inferred parameters: \n{format_parameters_table(median_params, rel_sigma_params, priors_uniform)}"
     )
 
+    
+
     sig3_params = []
     # for i in np.random.randint(len(sig3_flat_samples), size=50):
     # for sample in len(flat_samples):
@@ -662,12 +590,23 @@ if rank == 0:  # Only one process does the analysis
         sig3_params.append(params_for_jetsimpy_model(params))
     logger.info(f"3 Sigma parameters: {sig3_params[:10]}")
 
+    if args.model_median_r_band_lum_half_day:
+        r_band_nu = 4.56e14  # Hz
+        model_flux_half_day = model(
+            0.5 * 24 * 3600, r_band_nu, params_for_jetsimpy_model(median_params)
+        )
+        model_flux_half_day_cgs = model_flux_half_day * 1e-26  # convert mJy to erg/s/Hz/cm^2
+        model_lum_half_day = model_flux_half_day_cgs * 4 * np.pi * cosmo.luminosity_distance(args.redshift).to("cm").value**2
+        logger.info(f"Model median r-band flux at 0.5 day: {model_flux_half_day_cgs:.2e} erg/s/Hz/cm^2")
+
+        logger.info(f"Model median r-band luminosity at 0.5 day: {model_lum_half_day:.2e} erg/s/Hz")
+        exit(0)
+
     lc_plot(
         basedir,
         params_for_jetsimpy_model(median_params),
         sig3_params,
         observed_data=args.fullobsfile,
-        hide_z_text=args.hide_z_text,
     )
 
     if args.plot_spectrum:
