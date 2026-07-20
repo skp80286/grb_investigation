@@ -48,6 +48,7 @@ from jetsimpy_plot import (
 )
 from print_params import format_parameters_table, format_dict_table
 from priors import priors_map, priors_generic
+from lc_plot_settings import lc_plot_settings_default, lc_plot_settings_map
 
 from mpi4py import MPI
 
@@ -259,6 +260,14 @@ parser.add_argument(
     default="generic",
     help="Priors set to use (e.g. 'generic', 'dirty_fireball' or 'structured_offaxis')",
 )
+parser.add_argument(
+    "--lc-plot-settings",
+    type=str,
+    default="default",
+    choices=sorted(lc_plot_settings_map),
+    help="Named light-curve plot settings from lc_plot_settings.py (default: default).",
+)
+
 
 parser.add_argument(
     "--use_ul",
@@ -370,6 +379,9 @@ priors_uniform_dirty_fb = {
 """
 
 # Select priors based on command-line argument. Default to generic if unknown.
+lc_plot_settings = lc_plot_settings_map.get(
+    args.lc_plot_settings, lc_plot_settings_default
+)
 priors_uniform = priors_map.get(args.priors, priors_generic)
 
 if args.use_ksi:
@@ -668,6 +680,7 @@ if rank == 0:  # Only one process does the analysis
         sig3_params,
         observed_data=args.fullobsfile,
         hide_z_text=args.hide_z_text,
+        plot_settings=lc_plot_settings,
     )
 
     if args.plot_spectrum:

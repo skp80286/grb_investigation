@@ -55,6 +55,7 @@ import logging
 import argparse
 from jsonargparse import ArgumentParser
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from lc_plot_settings import lc_plot_settings_default
 
 ######################
 
@@ -315,7 +316,20 @@ def lc_plot(
     show_plot=False,
     save_plot=True,
     hide_z_text=False,
+    plot_settings=None,
 ):
+    """Plot a modeled light curve using ``plot_settings`` or the default."""
+    settings = lc_plot_settings_default if plot_settings is None else plot_settings
+    required_settings = {"xlim", "ylim", "multipliers", "filt_freqs", "band_colors", "band_secondary_colors"}
+    missing_settings = required_settings.difference(settings)
+    if missing_settings:
+        raise ValueError("plot_settings is missing required keys: " + ", ".join(sorted(missing_settings)))
+    xlim = settings["xlim"]
+    ylim = settings["ylim"]
+    multipliers = settings["multipliers"]
+    filt_freqs = settings["filt_freqs"]
+    band_colors = settings["band_colors"]
+    band_secondary_colors = settings["band_secondary_colors"]
     plt.style.use(["science", "high-vis"])
 
     mpl.rcParams.update(
@@ -530,8 +544,8 @@ def lc_plot(
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_ylim(1e-9, 1e5)
-    ax.set_xlim(1e4, 3e6)
+    ax.set_ylim(*ylim)
+    ax.set_xlim(*xlim)
     ax.set_xlabel(r"$t$ (s)")
     ax.set_ylabel(r"$F_\nu$ (mJy)")
     ax.grid(True, which="both", linestyle="--", alpha=0.3)
