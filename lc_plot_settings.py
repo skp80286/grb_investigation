@@ -1,9 +1,10 @@
 """Named light-curve plotting configurations."""
 
 # Add configurations here and register them below. Each must define xlim, ylim,
-# multipliers, filt_freqs, band_colors, and band_secondary_colors.
+# multipliers, band_colors, and band_secondary_colors. Light-curve frequencies
+# come from the observation file. Unmapped bands use multiplier 1 and a random color.
 lc_plot_settings_grb230812B = {
-    "xlim": (1e4, 1e7),
+    "xlim": (1e3, 1e7),
     "ylim": (1e-9, 1e3),
     "multipliers": {
         "X-ray(10keV)": 10,
@@ -25,6 +26,7 @@ lc_plot_settings_grb230812B = {
         "z": 3.46e14,
         "VT_B": 5.45077e14,
         "r": 4.8384e14,
+        "VT_R": 3.63385e14,
         "J": 2.40161e14,
         "g": 6.249e14,
         "L": 5.55516e14,
@@ -90,39 +92,23 @@ lc_plot_settings_grb230812B = {
     },
 }
 lc_plot_settings_default = {
-    "xlim": (1e4, 3e6),
+    "xlim": (1e2, 3e6),
     "ylim": (1e-9, 1e5),
     "multipliers": {
         "X-ray(10keV)": 32,
         "u": 1,
         "g": 2,
+        "b": 3,
         "VT_B": 4,
         "r": 8,
+        "v": 12,
         "R": 16,
         "i": 32,
-        "z'": 32,
+        "z": 32,
         "VT_R": 64,
         "J": 128,
         "radio(15.5GHz)": 1024,
-    },
-    "filt_freqs": {
-        "i": 3.98913e14,
-        "z": 3.46e14,
-        "VT_B": 5.45077e14,
-        "r": 4.8384e14,
-        "J": 2.40161e14,
-        "g": 6.249e14,
-        "L": 5.55516e14,
-        "u": 8.1178e14,
-        "X-ray(10keV)": 2.41799e18,
-        "radio(1.3GHz)": 1.3e9,
-        "radio(3GHz)": 3e9,
-        "radio(6GHz)": 6e9,
-        "radio(10GHz)": 1e10,
-        "radio(15GHz)": 1.5e10,
-        "radio(15.5GHz)": 1.55e10,
-        "radio(75GHz)": 7.5e10,
-        "radio(90GHz)": 9e10,
+        "radio(15GHz)": 1024,
     },
     "band_colors": {
         "X-ray(10keV)": "darkviolet",

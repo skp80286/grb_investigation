@@ -1,7 +1,7 @@
 # jetsimpy_plot.py — Plot GRB afterglow model light curves and overlay observations
 #
 # Description:
-# - Reads observed photometry from a CSV (`--obsfile`) with columns: Filt, Times, Fluxes, FluxErrs.
+# - Reads observed photometry from a CSV (`--obsfile`) with columns: Filt, Freqs, Times, Fluxes, FluxErrs.
 # - Builds a jetsimpy model from `--params` (dict/JSON), supports log-prefixed keys (e.g., loge0 → e0).
 # - Computes multi-band model fluxes, overlays observations, and saves plots and a log in `<obsdir>/output/`.
 #
@@ -94,6 +94,50 @@ def _normalize_ul_column(df):
         df["UL"] = df["UL"].astype(str).str.strip()
         df.loc[df["UL"] == "", "UL"] = "N"
     return df
+
+
+def _filt_freqs_from_obs(df):
+    """Map each filter label to its frequency (Hz) from the observation table."""
+    if "Filt" not in df.columns or "Freqs" not in df.columns:
+        raise ValueError(
+            "observed data must contain Filt and Freqs columns to set plot frequencies"
+        )
+    work = df[["Filt", "Freqs"]].copy()
+    work["Filt"] = work["Filt"].astype(str).str.strip()
+    work["Freqs"] = pd.to_numeric(work["Freqs"], errors="coerce")
+    work = work[(work["Filt"] != "") & (work["Filt"] != "nan")]
+    work = work.dropna(subset=["Freqs"])
+    filt_freqs = {}
+    for band, group in work.groupby("Filt", sort=False):
+        freqs = np.unique(group["Freqs"].to_numpy())
+        if len(freqs) > 1:
+            logger.warning(
+                "Filter %r has multiple frequencies %s; using the median.",
+                band,
+                freqs.tolist(),
+            )
+        filt_freqs[band] = float(np.median(freqs))
+    if not filt_freqs:
+        raise ValueError("observed data has no usable Filt/Freqs rows")
+    return filt_freqs
+
+
+def _color_for_band(band, color_map):
+    """Return the mapped color, or a stable random color when the band is unmapped."""
+    if band in color_map:
+        return color_map[band]
+    rng = random.Random(band)
+    color = "#{:06x}".format(rng.randint(0, 0xFFFFFF))
+    logger.info("No color mapping for band %r; using %s.", band, color)
+    return color
+
+
+def _multiplier_for_band(band, multipliers):
+    """Return the mapped flux multiplier, or 1 when the band is unmapped."""
+    if band in multipliers:
+        return multipliers[band]
+    logger.info("No multiplier for band %r; using 1.", band)
+    return 1
 
 
 def _expand_jetsimpy_params_inplace(params):
@@ -212,7 +256,7 @@ filt_freqs = {
     # "z'": 3.225e14,
     "z": 3.46e14,
     "VT_B": 5.45077e14,
-    # "VT_R": 3.63385e14,
+    "VT_R": 3.63385e14,
     # "r'": 4.732e14,
     "r": 4.8384e14,
     "J": 2.40161e14,
@@ -320,14 +364,22 @@ def lc_plot(
 ):
     """Plot a modeled light curve using ``plot_settings`` or the default."""
     settings = lc_plot_settings_default if plot_settings is None else plot_settings
-    required_settings = {"xlim", "ylim", "multipliers", "filt_freqs", "band_colors", "band_secondary_colors"}
+    required_settings = {
+        "xlim",
+        "ylim",
+        "multipliers",
+        "band_colors",
+        "band_secondary_colors",
+    }
     missing_settings = required_settings.difference(settings)
     if missing_settings:
-        raise ValueError("plot_settings is missing required keys: " + ", ".join(sorted(missing_settings)))
+        raise ValueError(
+            "plot_settings is missing required keys: "
+            + ", ".join(sorted(missing_settings))
+        )
     xlim = settings["xlim"]
     ylim = settings["ylim"]
     multipliers = settings["multipliers"]
-    filt_freqs = settings["filt_freqs"]
     band_colors = settings["band_colors"]
     band_secondary_colors = settings["band_secondary_colors"]
     plt.style.use(["science", "high-vis"])
@@ -354,9 +406,8 @@ def lc_plot(
         }
     )
 
-    # Time and Frequencies
-    ta = 1.0e3
-    tb = 1.0e7
+    # Model times follow the plot's time window.
+    ta, tb = xlim
     t = np.geomspace(ta, tb, num=100)
 
     df_allobs = pd.read_csv(observed_data)
@@ -366,18 +417,28 @@ def lc_plot(
     df_allobs["FluxErrs"] = pd.to_numeric(df_allobs["FluxErrs"], errors="coerce")
     # Normalize UL column: treat missing/blank as "N"
     df_allobs = _normalize_ul_column(df_allobs)
-    available_bands = (
-        set(df_allobs["Filt"].dropna()) if "Filt" in df_allobs.columns else set()
-    )
+    # Frequencies come from the observation file, not the settings map.
+    filt_freqs = _filt_freqs_from_obs(df_allobs)
+    if "Filt" in df_allobs.columns:
+        df_allobs["Filt"] = df_allobs["Filt"].astype(str).str.strip()
+    available_bands = set(filt_freqs)
+    band_multipliers = {
+        band: _multiplier_for_band(band, multipliers) for band in filt_freqs
+    }
+    resolved_band_colors = {
+        band: _color_for_band(band, band_colors) for band in filt_freqs
+    }
+    resolved_secondary_colors = {
+        band: band_secondary_colors.get(band, resolved_band_colors[band])
+        for band in filt_freqs
+    }
     logger.info(
         f"lc_plot: len(median_params)={len(median_params)}, len(sig3_parmas)={len(sig3_params)}, len(df_allobs)={len(df_allobs)}"
     )
 
-    # Precompute model fluxes for each band and for median + sig3 samples in parallel
+    # Precompute model fluxes for every frequency in the observation file.
     bands_to_compute = [
-        (band, nu)
-        for band, nu in sorted(filt_freqs.items(), key=lambda x: -x[1])
-        if band in multipliers
+        (band, nu) for band, nu in sorted(filt_freqs.items(), key=lambda x: -x[1])
     ]
 
     precomputed = {}  # keys: (band, 'median') or (band, idx)
@@ -405,8 +466,6 @@ def lc_plot(
     flux_times_seconds = [d * 86400.0 for d in flux_times_days]
     logger.info("band,frequency_hz,time_days,time_seconds,flux_mjy")
     for band, nu in sorted(filt_freqs.items(), key=lambda x: -x[1]):
-        if band not in multipliers:
-            continue
         try:
             flux_values = model(flux_times_seconds, [nu], median_params)
             flux_values = np.array(flux_values).flatten()
@@ -421,10 +480,7 @@ def lc_plot(
     # plot the model curves - expected lightcurve from jetsimpy
     j = -1
     for i, (band, nu) in enumerate(sorted(filt_freqs.items(), key=lambda x: -x[1])):
-        if band in multipliers:
-            multiplier = multipliers[band]
-        else:
-            continue
+        multiplier = band_multipliers[band]
         j += 1
 
         logger.info(f"Calculating for frequency: {nu}")
@@ -446,7 +502,7 @@ def lc_plot(
                     Fnu_sig3 * multiplier,
                     linewidth=1.0,
                     linestyle="-",
-                    color=band_secondary_colors.get(band, "#C5C6C7"),
+                    color=resolved_secondary_colors[band],
                     alpha=0.2,
                 )
 
@@ -456,7 +512,7 @@ def lc_plot(
                 linewidth=1.0,
                 linestyle="-",
                 label=f"{band} x {multiplier}",
-                color=band_colors.get(band, "#616569"),
+                color=resolved_band_colors[band],
                 alpha=1,
             )
         except Exception as e:
@@ -466,10 +522,7 @@ def lc_plot(
     # plot the actual observations
     j = -1
     for i, (band, nu) in enumerate(sorted(filt_freqs.items(), key=lambda x: -x[1])):
-        if band in multipliers:
-            multiplier = multipliers[band]
-        else:
-            continue
+        multiplier = band_multipliers[band]
         if band not in available_bands:
             logger.info(f"Skipping band={band}; not present in df_allobs['Filt'].")
             continue
@@ -496,7 +549,7 @@ def lc_plot(
                 fmt="o",
                 markersize=4,
                 alpha=1,
-                color=band_colors.get(band, "#616569"),
+                color=resolved_band_colors[band],
                 mec="black",
                 elinewidth=0.5,
                 capsize=2,
@@ -530,7 +583,7 @@ def lc_plot(
                 fmt="v",
                 markersize=6,
                 alpha=1,
-                color=band_colors.get(band, "#616569"),
+                color=resolved_band_colors[band],
                 mec="black",
                 elinewidth=0.5,
                 capsize=2,
@@ -623,11 +676,17 @@ def lc_plot(
 SPECTRUM_PLOT_TIME_EPOCHS = np.array(
     [
         1e3,
+        4e3,
         1e4,
+        15934,
+        67050,
+        77800,
+        195000,
+        225000,
         # 31500.0,
         # 32600.0,
         # 38500.0,
-        35244.0,
+        # 35244.0,
         # 42300.0,
         # 82900.0,
         # 118500.0,
@@ -1079,12 +1138,15 @@ def residual_plot(
     filt,
     show_plot=False,
     save_plot=True,
+    plot_settings=None,
 ):
     """
     Plot fractional residuals (observed − model) / model for one band vs time.
 
     Uses the same styling as lc_plot but does not draw posterior uncertainty ribbons.
     """
+    settings = lc_plot_settings_default if plot_settings is None else plot_settings
+    xlim = settings["xlim"]
     plt.style.use(["science", "high-vis"])
 
     mpl.rcParams.update(
@@ -1177,7 +1239,7 @@ def residual_plot(
 
     ax.tick_params(axis="both", which="both", direction="in", top=True, right=True)
     ax.set_xscale("log")
-    ax.set_xlim(1e3, 1e6)
+    ax.set_xlim(*xlim)
     ax.set_xlabel(r"$t$ (s)")
     ax.set_ylabel(r"$(F_\mathrm{obs} - F_\mathrm{model}) / F_\mathrm{model}$")
     ax.set_title(f"Residuals: {filt} (×{multiplier} in LC plot)")

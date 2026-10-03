@@ -2,7 +2,7 @@
 Multinest script for Jetsimpy EP model with CMLP priors.
 Sample command: mpirun -n 15 --oversubscribe python multinest_jetsimpy_EP_cmlp.py \
     --jetType tophat -z 0.36 --livepoints 200 --fullobsfile data/GRB230812B_modeling_v2.csv \
-        --plot-spectrum --plot-break-frequencies --plot-spectrum --priors 230812B \
+        --plot-spectrum --plot-break-frequencies --priors 230812B \
             --label v2theirs3 --obsfile data/GRB230812B_modeling_v2_theirs.csv
 """
 
@@ -59,11 +59,21 @@ chat_id = os.environ["Tele_Transient_chat_id"]
 
 
 def params_for_jetsimpy_model(params):
-    """Copy params for model(); with --use-ksi, set logthv from logksi + logthc (thv = xi * thc)."""
+    """Copy params for model(); with --use_ksi, set logthv from logksi + logthc (thv = xi * thc)."""
+
     p = dict(params)
-    if args.use_ksi and "logksi" in p:
-        p["logthv"] = p["logksi"] + p["logthc"]
-        del p["logksi"]
+
+    if args.use_ksi:
+        if "logksi" in p:
+            p["logthv"] = p["logksi"] + p["logthc"]
+            del p["logksi"]
+        elif "ksi" in p:
+            p["logthv"] = np.log10(p["ksi"]) + p["logthc"]
+            del p["ksi"]
+        else:
+            raise ValueError("logksi or ksi not in params")
+
+    # print("p:", p)
     return p
 
 
@@ -137,11 +147,12 @@ def log_likelihood(cube, ndim, nparams):
             params[name] = priors_uniform[name]["low"]
     params["jetType"] = args.jetType
     params["z"] = args.redshift
-
+    # print("params:", params)
     try:
         model_flux = model(obs_time, obs_nu, params_for_jetsimpy_model(params))
+        # print("model_flux:", model_flux)
     except Exception as e:
-        logger.debug("log_likelihood: model failed (%s); returning penalty llh", e)
+        logger.warning("log_likelihood: model failed (%s); returning penalty llh", e)
         return -1e100
 
     # Residuals and chi2 term
@@ -182,6 +193,7 @@ def log_likelihood(cube, ndim, nparams):
         maxllh = llh
         # params_str = ", ".join( f"{param}={cube[i]:.8f}" for i, param in enumerate(param_names))
         # logger.info(f"Log-likelihood: {llh}, {params_str}, \nobs_flux={obs_flux}\n, model_flux={model_flux}")
+    # print("llh:", llh)
     return llh
 
 
@@ -219,7 +231,7 @@ parser.add_argument(
     help="set cumulative weight to 1 for each observed band.",
 )
 parser.add_argument(
-    "--use-ksi",
+    "--use_ksi",
     action="store_true",
     help=(
         "Sample log10(xi) with xi = theta_v/theta_c instead of log10(theta_v); "
@@ -272,12 +284,18 @@ parser.add_argument(
 parser.add_argument(
     "--use_ul",
     action="store_true",
-    help="Consider upper-limit (UL) rows in the likelihood (default: False)",
+    help="Include upper-limit (UL) rows in the fit (default: drop UL rows).",
 )
 parser.add_argument(
     "--hide-z-text",
     action="store_true",
     help="Omit the textbox listing fitted parameter values on the light-curve plot.",
+)
+parser.add_argument(
+    "--overweight_errors",
+    type=float,
+    default=1.0,
+    help="Overweight errors by this factor (default: 1.0)",
 )
 args = parser.parse_args()
 
@@ -288,8 +306,8 @@ file = args.obsfile
 
 # Set up the output directory and logging
 obsfile_name = os.path.basename(args.obsfile)
-target_name = obsfile_name.split("_", 1)[0]
-output_root = "output"
+target_name = obsfile_name.split("_", 1)[0].split(".", 1)[0]
+output_root = "/mnt/growth_new/sameer/grb_investigation/output"
 base_prefix = f"multinest_{target_name}_{args.jetType}"
 
 os.makedirs(output_root, exist_ok=True)
@@ -369,7 +387,7 @@ priors_uniform_dirty_fb = {
     "logksi": {
         "low": 0.0,
         "high": 1,
-    },  # log10(theta_v/theta_c); only sampled with --use-ksi
+    },  # log10(theta_v/theta_c); only sampled with --use_ksi
     "p": {"low": 2.01, "high": 3.0},
     "s": {"low": 1, "high": 8},
     "loglf": {"low": 6, "high": 6},
@@ -388,6 +406,7 @@ if args.use_ksi:
     priors_uniform.pop("logthv", None)
 else:
     priors_uniform.pop("logksi", None)
+    priors_uniform.pop("ksi", None)
 
 if args.jetType != "powerlaw":
     priors_uniform["s"]["low"] = 0
@@ -408,6 +427,7 @@ param_names_math = {
     "logthc": r"$\log_{10}(\theta_{c})$",
     "logthv": r"$\log_{10}(\theta_{v})$",
     "logksi": r"$\log_{10}(\xi)$",
+    "ksi": r"$\xi$",
     "p": r"$p$",
     "s": r"$s$",
     "loglf": r"$\log_{10}(\Gamma_0)$",
@@ -441,6 +461,27 @@ if not args.post_process_only:
         raise ValueError(
             f"Input CSV file is missing required columns: {required_columns}"
         )
+
+    if "UL" in data.columns:
+        ul_mask = (
+            data["UL"]
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .isin({"Y", "YES", "TRUE", "T", "1"})
+        )
+        if not args.use_ul:
+            n_ul = int(ul_mask.sum())
+            data = data.loc[~ul_mask]
+            logger.info(
+                "Dropped %d upper-limit rows (pass --use_ul to include them in the fit).",
+                n_ul,
+            )
+        else:
+            logger.info(
+                "Considering upper limits in likelihood as requested (--use_ul set)."
+            )
+
     data = data[data["Fluxes"] > 0]  # taking detections only
     if len(data) == 0:
         logger.error("len of the input data is zero")
@@ -449,8 +490,11 @@ if not args.post_process_only:
     obs_nu = data["Freqs"].to_numpy()  # in Hz
     obs_flux = data["Fluxes"].to_numpy()  # in mJy
     obs_flux_err = data["FluxErrs"].to_numpy()  # in mJy
+    if args.overweight_errors > 0:
+        obs_flux_err = obs_flux_err * args.overweight_errors
+        logger.info(f"Overweighted errors by {args.overweight_errors}x")
 
-    if "UL" in data.columns:
+    if args.use_ul and "UL" in data.columns:
         obs_ul = (
             data["UL"]
             .astype(str)
@@ -461,17 +505,6 @@ if not args.post_process_only:
         )
     else:
         obs_ul = np.zeros(len(obs_flux), dtype=bool)
-
-    # Only consider upper limits in likelihood if requested via CLI
-    if not args.use_ul:
-        obs_ul = np.zeros(len(obs_flux), dtype=bool)
-        logger.info(
-            "Upper limits present in file but will be ignored (use --use_ul to enable)."
-        )
-    else:
-        logger.info(
-            "Considering upper limits in likelihood as requested (--use_ul set)."
-        )
 
     # Log-determinant term
     err = np.where(obs_flux > 0, obs_flux_err / obs_flux, np.inf)
@@ -709,6 +742,7 @@ if rank == 0:  # Only one process does the analysis
                 median_for_plot,
                 observed_data=args.fullobsfile,
                 filt=filt,
+                plot_settings=lc_plot_settings,
             )
 
     if args.alert:

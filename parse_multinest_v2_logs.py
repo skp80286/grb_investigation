@@ -87,6 +87,20 @@ def parse_log_file(path):
             bic = float(m.group(1))
             break
 
+    lnz = ""
+    for line in reversed(lines):
+        m = re.search(r"lnZ=([0-9.+-]+)", line)
+        if m:
+            lnz = float(m.group(1))
+            break
+
+    lnz_err = ""
+    for line in reversed(lines):
+        m = re.search(r"lnZErr=([0-9.+-]+)", line)
+        if m:
+            lnz_err = float(m.group(1))
+            break
+
     fixed = {}
     inferred = {}
     for i, line in enumerate(lines):
@@ -113,6 +127,8 @@ def parse_log_file(path):
         "obsfile": obsfile,
         "n_obs": n_obs,
         "bic": bic,
+        "lnz": lnz,
+        "lnz_err": lnz_err,
         "max_rel_sigma": max_sigma,
         "max_rel_sigma_param": max_param,
         "fixed": fixed,
@@ -129,6 +145,8 @@ def build_rows(runs):
         ("obs_data_file", lambda r: r["obsfile"]),
         ("n_observations", lambda r: r["n_obs"]),
         ("BIC", lambda r: sci2(r["bic"])),
+        ("lnZ", lambda r: sci2(r["lnz"])),
+        ("lnZErr", lambda r: sci2(r["lnz_err"])),
         ("max_rel_sigma", lambda r: sci2(r["max_rel_sigma"])),
         ("max_rel_sigma_param", lambda r: r["max_rel_sigma_param"]),
     ]
