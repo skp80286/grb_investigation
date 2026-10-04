@@ -37,12 +37,16 @@ import requests
 import sys
 import warnings
 
-from jetsimpy_plot import (
-    SPECTRUM_PLOT_TIME_EPOCHS,
-    break_frequency_evolution_plot,
-    build_spectrum_epoch_observations,
-    lc_plot,
+from jetsimpy_model import (
+    PLOT_DATA_FILENAME,
+    compute_plot_data,
+    load_plot_data,
     model,
+    save_plot_data,
+)
+from jetsimpy_plot import (
+    break_frequency_evolution_plot,
+    lc_plot,
     residual_plot,
     spectrum_plot,
 )
@@ -707,40 +711,45 @@ if rank == 0:  # Only one process does the analysis
         sig3_params.append(params_for_jetsimpy_model(params))
     logger.info(f"3 Sigma parameters: {sig3_params[:10]}")
 
+    plot_data_path = os.path.join(basedir, PLOT_DATA_FILENAME)
+    if args.post_process_only:
+        if not os.path.isfile(plot_data_path):
+            raise FileNotFoundError(
+                f"Plot data file not found: {plot_data_path}. "
+                "Run without --post_process_only so the model curves are saved."
+            )
+        logger.info("Loading plot data from %s", plot_data_path)
+        plot_data = load_plot_data(plot_data_path)
+    else:
+        logger.info("Evaluating model curves for plotting")
+        plot_data = compute_plot_data(
+            params_for_jetsimpy_model(median_params),
+            sig3_params,
+            args.fullobsfile,
+            lc_plot_settings["xlim"],
+        )
+        save_plot_data(plot_data_path, plot_data)
+        logger.info("Saved plot data to %s", plot_data_path)
+
     lc_plot(
         basedir,
-        params_for_jetsimpy_model(median_params),
-        sig3_params,
-        observed_data=args.fullobsfile,
+        plot_data,
         hide_z_text=args.hide_z_text,
         plot_settings=lc_plot_settings,
     )
 
     if args.plot_spectrum:
-        df_spectrum_obs = pd.read_csv(args.fullobsfile)
-        epoch_obs = build_spectrum_epoch_observations(
-            df_spectrum_obs, SPECTRUM_PLOT_TIME_EPOCHS, dt_sec=500.0
-        )
-        spectrum_plot(
-            basedir,
-            params_for_jetsimpy_model(median_params),
-            time_epochs=SPECTRUM_PLOT_TIME_EPOCHS,
-            epoch_observations=epoch_obs,
-        )
+        spectrum_plot(basedir, plot_data)
 
     if args.plot_break_frequencies:
-        break_frequency_evolution_plot(
-            basedir, params_for_jetsimpy_model(median_params)
-        )
+        break_frequency_evolution_plot(basedir, plot_data)
 
     if args.plot_residuals.strip():
-        median_for_plot = params_for_jetsimpy_model(median_params)
         for filt in (s.strip() for s in args.plot_residuals.split(",") if s.strip()):
             logger.info("Creating residual plot for filter %r", filt)
             residual_plot(
                 basedir,
-                median_for_plot,
-                observed_data=args.fullobsfile,
+                plot_data,
                 filt=filt,
                 plot_settings=lc_plot_settings,
             )

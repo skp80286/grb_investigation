@@ -1,44 +1,29 @@
-# jetsimpy_plot.py — Plot GRB afterglow model light curves and overlay observations
+# jetsimpy_plot.py — Plot GRB afterglow light curves from saved model output
 #
 # Description:
-# - Reads observed photometry from a CSV (`--obsfile`) with columns: Filt, Freqs, Times, Fluxes, FluxErrs.
-# - Builds a jetsimpy model from `--params` (dict/JSON), supports log-prefixed keys (e.g., loge0 → e0).
-# - Computes multi-band model fluxes, overlays observations, and saves plots and a log in `<obsdir>/output/`.
+# - Draws figures from a plot-data file produced by jetsimpy_model.compute_plot_data.
+# - Does not evaluate the jetsimpy model.
 #
 # CLI:
-#   --obsfile  Path to observations CSV.
-#   --params   JSON/dict of model parameters; include `jetType` (gaussian|powerlaw|tophat) and `z`.
-#   --spectrum Plot F_nu vs nu at 1, 10, …, 1e6 s using Jet.Flux() (no light-curve plot).
+#   --obsfile  Path to observations CSV (used only to build the plot-data file).
+#   --params   JSON/dict of model parameters; include `jetType` and `z`.
+#   --spectrum Plot the saved F_nu vs nu curves.
 #   --label    Optional label (reserved).
 #
 # Outputs:
-#   <obsdir>/output/lc_afterflow_obs_matching.pdf and .png
-#   <obsdir>/output/jetsimpy_plot_.log
+#   output/plot_data.pkl
+#   output/lc_afterflow_obs_matching.pdf and .png
+#   output/jetsimpy_plot_.log
 #
 # Example:
 #   python jetsimpy_plot.py --obsfile data/GRB250916A_cons.csv  \
 # --params '{jetType: tophat, e0: 4.87e52, epsb: 0.0448, epse: 0.3981, \
 # n0: 0.0032, thc: 0.0623, thv: 0.0014, p: 2.3578, lf: 100, A: 0, s: 0, z: 2.011}'
-#
-# You can also use this code as a library.
-# Example:
-# import jetsimpy_plot as jsim
-# %matplotlib inline # if you want to show plots interactively in a jupyter notebook
-# import matplotlib.pyplot as plt
 
-# params={'jetType': 'tophat', 'e0': 4.87e52, 'epsb': 0.0448, 'epse': 0.3981, 'n0': 0.0032, 'thc': 0.0623, 'thv': 0.0014, 'p': 2.3578, 'loglf': 100, 'A': 0, 's': 0, 'z': 2.011}
-# jsim.lc_plot(basedir="output", params=params, observed_data='data/GRB250916A_cons.csv', show_plot=True, save_plot=False)
-
-import copy
-import json
 import os
 import random
-import datetime
-import warnings
-
 import sys
 
-import jetsimpy
 import matplotlib as mpl
 
 mpl.use("Agg")
@@ -47,23 +32,13 @@ import scienceplots
 
 
 import numpy as np
-import pandas as pd
-from astropy.cosmology import Planck15 as cosmo
-from scipy import stats
-from scipy.optimize import curve_fit, minimize, newton
 import logging
 import argparse
-from jsonargparse import ArgumentParser
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from lc_plot_settings import lc_plot_settings_default
 
 ######################
 
 logger = logging.getLogger(__name__)
-
-# jetsimpy: Flux is erg/s/cm^2 integrated over ν; FluxDensity divides by this for mJy
-_MJY_PER_CGS_FNU = 1e-26
-_SEC_PER_DAY = 86400.0
 
 # Serif stack for publication-style figures (PDF embedding + math consistency)
 _PAPER_SERIF_RC = {
@@ -77,49 +52,6 @@ _PAPER_SERIF_RC = {
     ],
     "mathtext.fontset": "dejavuserif",
 }
-
-
-def _normalize_ul_column(df):
-    """
-    Ensure 'UL' column exists and blank/NaN values are treated as 'N'.
-    Creates 'UL' column with all 'N' values if it doesn't exist.
-    Fills blank and NaN values with 'N'.
-    Mutates df in place and returns it.
-    """
-    if "UL" not in df.columns:
-        df["UL"] = "N"
-    else:
-        # Replace NaN and empty strings with "N"
-        df["UL"] = df["UL"].fillna("N")
-        df["UL"] = df["UL"].astype(str).str.strip()
-        df.loc[df["UL"] == "", "UL"] = "N"
-    return df
-
-
-def _filt_freqs_from_obs(df):
-    """Map each filter label to its frequency (Hz) from the observation table."""
-    if "Filt" not in df.columns or "Freqs" not in df.columns:
-        raise ValueError(
-            "observed data must contain Filt and Freqs columns to set plot frequencies"
-        )
-    work = df[["Filt", "Freqs"]].copy()
-    work["Filt"] = work["Filt"].astype(str).str.strip()
-    work["Freqs"] = pd.to_numeric(work["Freqs"], errors="coerce")
-    work = work[(work["Filt"] != "") & (work["Filt"] != "nan")]
-    work = work.dropna(subset=["Freqs"])
-    filt_freqs = {}
-    for band, group in work.groupby("Filt", sort=False):
-        freqs = np.unique(group["Freqs"].to_numpy())
-        if len(freqs) > 1:
-            logger.warning(
-                "Filter %r has multiple frequencies %s; using the median.",
-                band,
-                freqs.tolist(),
-            )
-        filt_freqs[band] = float(np.median(freqs))
-    if not filt_freqs:
-        raise ValueError("observed data has no usable Filt/Freqs rows")
-    return filt_freqs
 
 
 def _color_for_band(band, color_map):
@@ -138,92 +70,6 @@ def _multiplier_for_band(band, multipliers):
         return multipliers[band]
     logger.info("No multiplier for band %r; using 1.", band)
     return 1
-
-
-def _expand_jetsimpy_params_inplace(params):
-    """
-    Apply log* and expthc/expthv conversions. Mutates ``params`` in place.
-    """
-    for k in list(params.keys()):
-        if isinstance(k, str) and k.startswith("log"):
-            new_k = k[3:]
-            params[new_k] = 10 ** params[k]
-            params.pop(k)
-
-    if "expthc" in params:
-        params["thc"] = np.log10(params["expthc"])
-        params.pop("expthc")
-    if "expthv" in params:
-        params["thv"] = np.log10(params["expthv"])
-        params.pop("expthv")
-
-
-def _jet_and_P(params):
-    """
-    Build jetsimpy.Jet and emissivity parameter dict P from *physical* params.
-
-    Mutates ``params`` in place (log-prefixed keys, expthc/expthv). Pass a copy
-    if the caller needs the original dict unchanged.
-    """
-    _expand_jetsimpy_params_inplace(params)
-    dl = cosmo.luminosity_distance(params["z"]).to("Mpc").value
-
-    P = dict(
-        eps_e=params["epse"],
-        eps_b=params["epsb"],
-        p=params["p"],
-        theta_v=params["thv"],
-        d=dl,
-        z=params["z"],
-    )
-
-    jet_P = dict(
-        Eiso=params["e0"],
-        lf=params["lf"],
-        theta_c=params["thc"],
-        n0=params["n0"],
-        A=params["A"],
-        s=params["s"],
-    )
-
-    if params["jetType"] == "gaussian":
-        jetProfile = jetsimpy.Gaussian(jet_P["theta_c"], jet_P["Eiso"], lf0=jet_P["lf"])
-    elif params["jetType"] == "powerlaw":
-        jetProfile = jetsimpy.PowerLaw(
-            jet_P["theta_c"], jet_P["Eiso"], lf0=jet_P["lf"], s=jet_P["s"]
-        )
-    else:
-        jetProfile = jetsimpy.TopHat(jet_P["theta_c"], jet_P["Eiso"], lf0=jet_P["lf"])
-
-    jet = jetsimpy.Jet(
-        jetProfile,
-        nwind=jet_P["A"],
-        nism=jet_P["n0"],
-        grid=jetsimpy.ForwardJetRes(jet_P["theta_c"], 129),
-        spread=True,
-        tmin=1.0,
-        tmax=3.2e9,
-        tail=True,
-        cal_level=1,
-        rtol=1e-6,
-        cfl=0.9,
-    )
-    return jet, P
-
-
-def model(obs_time, obs_nu, params):
-    p = copy.deepcopy(params)
-    jet, P = _jet_and_P(p)
-    model_flux = jet.FluxDensity(
-        obs_time,
-        obs_nu,
-        P,
-        model="sync",
-        rtol=1e-3,
-        max_iter=100,
-        force_return=True,
-    )
-    return model_flux
 
 
 # multipliers = {'X-ray(1keV)': 10.0, 'X-ray(10keV)': 100.0, 'g': 1.0, 'L': 1, 'R': 1,'r': 1,
@@ -352,17 +198,31 @@ band_secondary_colors = {
 """
 
 
-def lc_plot(
-    basedir,
-    median_params,
-    sig3_params,
-    observed_data,
-    show_plot=False,
-    save_plot=True,
-    hide_z_text=False,
-    plot_settings=None,
-):
-    """Plot a modeled light curve using ``plot_settings`` or the default."""
+def _apply_paper_style(legend_fontsize=12, line_width=0.75):
+    plt.style.use(["science", "high-vis"])
+    mpl.rcParams.update(
+        {
+            **_PAPER_SERIF_RC,
+            "font.size": 5,  # minimum allowed by Nature
+            "axes.titlesize": 12,
+            "axes.labelsize": 12,
+            "xtick.labelsize": 12,
+            "ytick.labelsize": 12,
+            "legend.fontsize": legend_fontsize,
+            "pdf.fonttype": 42,  # embed fonts as TrueType
+            "ps.fonttype": 42,
+            "savefig.dpi": 300,
+            "axes.linewidth": 0.5,
+            "lines.linewidth": line_width,
+            "xtick.major.width": 0.5,
+            "ytick.major.width": 0.5,
+            "xtick.minor.width": 0.3,
+            "ytick.minor.width": 0.3,
+        }
+    )
+
+
+def _light_curve_style(plot_settings):
     settings = lc_plot_settings_default if plot_settings is None else plot_settings
     required_settings = {
         "xlim",
@@ -377,156 +237,99 @@ def lc_plot(
             "plot_settings is missing required keys: "
             + ", ".join(sorted(missing_settings))
         )
+    return settings
+
+
+def lc_plot(
+    basedir,
+    plot_data,
+    show_plot=False,
+    save_plot=True,
+    hide_z_text=False,
+    plot_settings=None,
+):
+    """Plot a light curve from arrays in ``plot_data`` (no model evaluation)."""
+    settings = _light_curve_style(plot_settings)
     xlim = settings["xlim"]
     ylim = settings["ylim"]
     multipliers = settings["multipliers"]
     band_colors = settings["band_colors"]
     band_secondary_colors = settings["band_secondary_colors"]
-    plt.style.use(["science", "high-vis"])
+    _apply_paper_style()
 
-    mpl.rcParams.update(
-        {
-            **_PAPER_SERIF_RC,
-            "font.size": 5,  # minimum allowed by Nature
-            "axes.titlesize": 12,
-            "axes.labelsize": 12,
-            "xtick.labelsize": 12,
-            "ytick.labelsize": 12,
-            "legend.fontsize": 12,
-            "pdf.fonttype": 42,  # embed fonts as TrueType
-            "ps.fonttype": 42,
-            # "figure.dpi": 300,  # ensure high-res bitmap export when needed
-            "savefig.dpi": 300,
-            "axes.linewidth": 0.5,
-            "lines.linewidth": 0.75,
-            "xtick.major.width": 0.5,
-            "ytick.major.width": 0.5,
-            "xtick.minor.width": 0.3,
-            "ytick.minor.width": 0.3,
-        }
-    )
-
-    # Model times follow the plot's time window.
-    ta, tb = xlim
-    t = np.geomspace(ta, tb, num=100)
-
-    df_allobs = pd.read_csv(observed_data)
-    # Convert numeric columns to numeric types, handling invalid values
-    df_allobs["Times"] = pd.to_numeric(df_allobs["Times"], errors="coerce")
-    df_allobs["Fluxes"] = pd.to_numeric(df_allobs["Fluxes"], errors="coerce")
-    df_allobs["FluxErrs"] = pd.to_numeric(df_allobs["FluxErrs"], errors="coerce")
-    # Normalize UL column: treat missing/blank as "N"
-    df_allobs = _normalize_ul_column(df_allobs)
-    # Frequencies come from the observation file, not the settings map.
-    filt_freqs = _filt_freqs_from_obs(df_allobs)
-    if "Filt" in df_allobs.columns:
-        df_allobs["Filt"] = df_allobs["Filt"].astype(str).str.strip()
-    available_bands = set(filt_freqs)
+    median_params = plot_data["median_params"]
+    t = np.asarray(plot_data["lc_times"], dtype=float)
+    df_allobs = plot_data["observations"]
+    light_curves = plot_data["light_curves"]
+    bands = [curve["band"] for curve in light_curves]
     band_multipliers = {
-        band: _multiplier_for_band(band, multipliers) for band in filt_freqs
+        band: _multiplier_for_band(band, multipliers) for band in bands
     }
     resolved_band_colors = {
-        band: _color_for_band(band, band_colors) for band in filt_freqs
+        band: _color_for_band(band, band_colors) for band in bands
     }
     resolved_secondary_colors = {
         band: band_secondary_colors.get(band, resolved_band_colors[band])
-        for band in filt_freqs
+        for band in bands
     }
     logger.info(
-        f"lc_plot: len(median_params)={len(median_params)}, len(sig3_parmas)={len(sig3_params)}, len(df_allobs)={len(df_allobs)}"
+        "lc_plot: n_bands=%d, n_obs=%d, n_times=%d",
+        len(light_curves),
+        len(df_allobs),
+        len(t),
     )
 
-    # Precompute model fluxes for every frequency in the observation file.
-    bands_to_compute = [
-        (band, nu) for band, nu in sorted(filt_freqs.items(), key=lambda x: -x[1])
-    ]
-
-    precomputed = {}  # keys: (band, 'median') or (band, idx)
-    max_workers = min(32, (os.cpu_count() or 1) * 4)
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_map = {}
-        for band, nu in bands_to_compute:
-            future = executor.submit(model, t, [nu], median_params)
-            future_map[future] = (band, "median")
-            for i, params in enumerate(sig3_params):
-                future = executor.submit(model, t, [nu], params)
-                future_map[future] = (band, i)
-
-        for fut in as_completed(future_map):
-            band, tag = future_map[fut]
-            try:
-                res = np.array(fut.result())
-            except Exception as e:
-                logger.error(f"model failed during precompute for band {band}: {e}")
-                res = None
-            precomputed[(band, tag)] = res
-
-    # Print fluxes at selected observer times in days for each band.
-    flux_times_days = [1, 2, 4, 8, 16]
-    flux_times_seconds = [d * 86400.0 for d in flux_times_days]
     logger.info("band,frequency_hz,time_days,time_seconds,flux_mjy")
-    for band, nu in sorted(filt_freqs.items(), key=lambda x: -x[1]):
-        try:
-            flux_values = model(flux_times_seconds, [nu], median_params)
-            flux_values = np.array(flux_values).flatten()
-        except Exception as e:
-            logger.error(f"model failed for band {band} at selected times: {e}")
-            continue
-        for day, sec, flux in zip(flux_times_days, flux_times_seconds, flux_values):
-            logger.info(f"{band},{nu},{day},{sec},{flux}")
+    for row in plot_data["checkpoints"]:
+        logger.info(
+            "%s,%s,%s,%s,%s",
+            row["band"],
+            row["nu"],
+            row["time_days"],
+            row["time_seconds"],
+            row["flux_mjy"],
+        )
 
     fig, ax = plt.subplots(1, 1, figsize=(8, 5))
 
-    # plot the model curves - expected lightcurve from jetsimpy
-    j = -1
-    for i, (band, nu) in enumerate(sorted(filt_freqs.items(), key=lambda x: -x[1])):
+    # plot the model curves saved from jetsimpy
+    for curve in light_curves:
+        band = curve["band"]
         multiplier = band_multipliers[band]
-        j += 1
+        nu = curve["nu"]
+        logger.info(f"Plotting saved model for frequency: {nu}")
+        Fnu_model = np.asarray(curve["median_flux"], dtype=float)
+        if not np.any(np.isfinite(Fnu_model)):
+            logger.error("saved median light curve for band %s is missing", band)
+            continue
 
-        logger.info(f"Calculating for frequency: {nu}")
-        Fnu_model = []
-        # Retrieve precomputed median result
-        try:
-            Fnu_model = precomputed.get((band, "median"))
-            if Fnu_model is None:
-                raise RuntimeError("No precomputed median model for band")
-
-            # plot sig3 samples (if any)
-            for idx in range(len(sig3_params)):
-                Fnu_sig3 = precomputed.get((band, idx))
-                if Fnu_sig3 is None:
-                    logger.debug(f"Missing precomputed sig3 for band={band}, idx={idx}")
-                    continue
-                ax.plot(
-                    t,
-                    Fnu_sig3 * multiplier,
-                    linewidth=1.0,
-                    linestyle="-",
-                    color=resolved_secondary_colors[band],
-                    alpha=0.2,
-                )
-
+        sample_fluxes = np.asarray(curve["sample_fluxes"], dtype=float)
+        for Fnu_sig3 in sample_fluxes:
+            if not np.any(np.isfinite(Fnu_sig3)):
+                continue
             ax.plot(
                 t,
-                Fnu_model * multiplier,
+                Fnu_sig3 * multiplier,
                 linewidth=1.0,
                 linestyle="-",
-                label=f"{band} x {multiplier}",
-                color=resolved_band_colors[band],
-                alpha=1,
+                color=resolved_secondary_colors[band],
+                alpha=0.2,
             )
-        except Exception as e:
-            logger.error(f"model failed for band {band}; {e}")
-            return -1e100
+
+        ax.plot(
+            t,
+            Fnu_model * multiplier,
+            linewidth=1.0,
+            linestyle="-",
+            label=f"{band} x {multiplier}",
+            color=resolved_band_colors[band],
+            alpha=1,
+        )
 
     # plot the actual observations
-    j = -1
-    for i, (band, nu) in enumerate(sorted(filt_freqs.items(), key=lambda x: -x[1])):
+    for curve in light_curves:
+        band = curve["band"]
         multiplier = band_multipliers[band]
-        if band not in available_bands:
-            logger.info(f"Skipping band={band}; not present in df_allobs['Filt'].")
-            continue
-        j += 1
 
         Fnu_allobs = (
             df_allobs[(df_allobs["Filt"] == band) & (df_allobs["UL"] == "N")][
@@ -672,167 +475,42 @@ def lc_plot(
     plt.close(fig)
 
 
-# Observer times (s) used when overlaying spectrum observations from a photometry CSV.
-SPECTRUM_PLOT_TIME_EPOCHS = np.array(
-    [
-        1e3,
-        4e3,
-        1e4,
-        15934,
-        67050,
-        77800,
-        195000,
-        225000,
-        # 31500.0,
-        # 32600.0,
-        # 38500.0,
-        # 35244.0,
-        # 42300.0,
-        # 82900.0,
-        # 118500.0,
-        189500.0,
-        1e6,
-    ],
-    dtype=float,
-)
-
-
-def build_spectrum_epoch_observations(df_allobs, epochs, dt_sec=500.0):
-    """
-    For each entry in ``epochs``, collect detections with ``Times`` within ±``dt_sec``
-    seconds of that epoch.
-
-    Each returned observation is ``(nu_hz, flux_mjy, flux_err_mjy)`` from columns
-    ``Freqs``, ``Fluxes``, ``FluxErrs``. If ``UL`` is present, only rows with
-    ``UL == 'N'`` are used.
-
-    Returns a list of length ``len(epochs)``; entries are lists (possibly empty).
-    """
-    df = df_allobs.copy()
-    for col in ("Times", "Freqs", "Fluxes", "FluxErrs"):
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    # Normalize UL column: treat missing/blank as "N"
-    df = _normalize_ul_column(df)
-    df = df[df["UL"].astype(str) == "N"]
-    if "Freqs" not in df.columns:
-        return [[] for _ in np.asarray(epochs, dtype=float)]
-
-    t_arr = df["Times"].to_numpy(dtype=float)
-    out = []
-    for t0 in np.asarray(epochs, dtype=float):
-        m = np.abs(t_arr - t0) <= float(dt_sec)
-        sub = df.loc[m]
-        if len(sub) == 0:
-            out.append([])
-            continue
-        pts = []
-        for _, row in sub.iterrows():
-            nu = row["Freqs"]
-            fl = row["Fluxes"]
-            fe = row["FluxErrs"]
-            if not (np.isfinite(nu) and np.isfinite(fl) and np.isfinite(fe)):
-                continue
-            pts.append((float(nu), float(fl), float(fe)))
-        out.append(pts)
-    return out
+# Observer-time unit used only to label spectrum epochs.
+_SEC_PER_DAY = 86400.0
 
 
 def spectrum_plot(
     basedir,
-    median_params,
+    plot_data,
     show_plot=False,
     save_plot=True,
-    n_freq_bins=100,
-    time_epochs=None,
-    epoch_observations=None,
 ):
-    """
-    Plot modeled afterglow spectrum F_ν vs ν at several epochs using ``Jet.Flux``.
+    """Plot the saved afterglow spectrum F_ν vs ν. Does not evaluate the model."""
+    _apply_paper_style(legend_fontsize=10)
 
-    Frequency grid: logarithmic edges from 1e9 to 1e19 Hz. For each bin
-    ``[ν_lo, ν_hi]``, integrated flux ``Flux(t, ν_lo, ν_hi)`` (erg/s/cm²) is
-    divided by ``(ν_hi - ν_lo)`` and by ``1e-26`` to match mJy, consistent with
-    ``FluxDensity`` for narrow bins.
-
-    Time epochs: if ``time_epochs`` is omitted, uses 1 s, 10 s, …, 1e6 s (seven
-    log-spaced points). Optional ``epoch_observations`` is a list of the same
-    length as ``time_epochs``; each element is a list of
-    ``(nu_hz, flux_mjy, flux_err_mjy)`` tuples plotted at that ν with the same
-    color as the model curve for that epoch. Legend labels show observer time in
-    days.
-    """
-    plt.style.use(["science", "high-vis"])
-
-    mpl.rcParams.update(
-        {
-            **_PAPER_SERIF_RC,
-            "font.size": 5,
-            "axes.titlesize": 12,
-            "axes.labelsize": 12,
-            "xtick.labelsize": 12,
-            "ytick.labelsize": 12,
-            "legend.fontsize": 10,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "savefig.dpi": 300,
-            "axes.linewidth": 0.5,
-            "lines.linewidth": 0.75,
-            "xtick.major.width": 0.5,
-            "ytick.major.width": 0.5,
-            "xtick.minor.width": 0.3,
-            "ytick.minor.width": 0.3,
-        }
-    )
-
-    p = copy.deepcopy(median_params)
-    jet, P = _jet_and_P(p)
-
-    nu_edges = np.geomspace(1e9, 1e19, n_freq_bins + 1)
-    nu_lo = nu_edges[:-1]
-    nu_hi = nu_edges[1:]
-    dnu = nu_hi - nu_lo
-    nu_c = np.sqrt(nu_lo * nu_hi)
-
-    # 1 s, 10 s, …, 1e6 s (seven decades) when custom epochs are not provided
-    times = (
-        np.asarray(time_epochs, dtype=float)
-        if time_epochs is not None
-        else np.geomspace(1.0, 1.0e6, num=7)
-    )
+    spectrum = plot_data["spectrum"]
+    times = np.asarray(spectrum["times"], dtype=float)
+    nu_c = np.asarray(spectrum["nu"], dtype=float)
+    fnu_all = np.asarray(spectrum["fnu"], dtype=float)
+    obs_by_epoch = spectrum["observations"]
     n_ep = len(times)
-    if epoch_observations is None:
-        obs_by_epoch = [[] for _ in range(n_ep)]
-    else:
-        if len(epoch_observations) != n_ep:
-            raise ValueError(
-                f"epoch_observations must have length {n_ep} (same as time epochs), "
-                f"got {len(epoch_observations)}"
-            )
-        obs_by_epoch = list(epoch_observations)
+    if len(obs_by_epoch) != n_ep:
+        raise ValueError(
+            f"spectrum observations must have length {n_ep}, got {len(obs_by_epoch)}"
+        )
+    if fnu_all.shape != (n_ep, len(nu_c)):
+        raise ValueError(
+            f"spectrum fnu shape {fnu_all.shape} does not match "
+            f"({n_ep}, {len(nu_c)})"
+        )
 
     colors = mpl.cm.viridis(np.linspace(0.15, 0.95, n_ep))
-
     fig, ax = plt.subplots(1, 1, figsize=(8, 5))
 
     for it, t_obs in enumerate(times):
-        fnu = np.empty_like(nu_c, dtype=float)
-        for i in range(len(nu_c)):
-            fband = jet.Flux(
-                t_obs,
-                float(nu_lo[i]),
-                float(nu_hi[i]),
-                P,
-                model="sync",
-                rtol=1e-3,
-                max_iter=100,
-                force_return=True,
-            )
-            fnu[i] = fband / dnu[i] / _MJY_PER_CGS_FNU
-
         ax.plot(
             nu_c,
-            fnu,
+            fnu_all[it],
             color=colors[it],
             linestyle="-",
             label=f"{t_obs / _SEC_PER_DAY:.4g} d",
@@ -881,155 +559,6 @@ def spectrum_plot(
     plt.close(fig)
 
 
-def _estimate_break_frequencies(nu, fnu):
-    """
-    Estimate nu_m and nu_c from a sampled synchrotron spectrum.
-
-    - nu_m: frequency at peak F_nu
-    - nu_c: post-peak break where local slope steepens by ~0.5
-    """
-    nu = np.asarray(nu, dtype=float)
-    fnu = np.asarray(fnu, dtype=float)
-    valid = np.isfinite(nu) & np.isfinite(fnu) & (nu > 0) & (fnu > 0)
-    if np.count_nonzero(valid) < 8:
-        return np.nan, np.nan
-
-    nu = nu[valid]
-    fnu = fnu[valid]
-    lognu = np.log10(nu)
-    logf = np.log10(fnu)
-
-    i_m = int(np.argmax(logf))
-    nu_m = nu[i_m]
-
-    # Need post-peak points to infer cooling break.
-    if i_m >= len(nu) - 5:
-        return nu_m, np.nan
-
-    alpha = np.gradient(logf, lognu)  # local spectral slope dlogF/dlognu
-    lo = min(i_m + 1, len(alpha) - 2)
-    hi = min(i_m + 4, len(alpha))
-    alpha_post_peak = np.median(alpha[lo:hi]) if hi > lo else alpha[lo]
-    target_alpha = alpha_post_peak - 0.5
-
-    cand = np.arange(i_m + 2, len(alpha) - 1)
-    if len(cand) == 0:
-        return nu_m, np.nan
-
-    steep = cand[alpha[cand] < alpha_post_peak - 0.2]
-    search = steep if len(steep) > 0 else cand
-    i_c = search[np.argmin(np.abs(alpha[search] - target_alpha))]
-    nu_c = nu[int(i_c)]
-    return nu_m, nu_c
-
-
-def compute_break_frequencies_tophat_analytical(
-    z, p, eps_e, eps_b, e0_erg, n0, t_seconds
-):
-    """
-    Analytical ISM forward-shock synchrotron break frequencies vs observer time (tophat scalings).
-
-    Uses the same scaling-law forms as sync_freq_evolution in GRB250704B_170817_jetsimpy.ipynb:
-    observer time in days td = t/(86400 s), isotropic equivalent energy E52 = E_iso / 10^52 erg.
-
-    Returns arrays shaped like ``t_seconds``.
-    """
-    td = np.asarray(t_seconds, dtype=float) / 86400.0
-    E52 = e0_erg / 1e52
-    nu_m = (
-        5.1e15
-        * (1 + z) ** 0.5
-        * ((p - 2) / (p - 1)) ** 2
-        * eps_e**2
-        * eps_b**0.5
-        * E52**0.5
-        * td ** (-1.5)
-    )
-    nu_c = (
-        2.7e12
-        * (1 + z) ** (-0.5)
-        * eps_b ** (-1.5)
-        * E52 ** (-0.5)
-        * n0 ** (-1)
-        * td ** (-0.5)
-    )
-    return nu_m, nu_c
-
-
-def compute_break_frequencies_from_spectrum(jet, P, times, n_freq_bins=160):
-    """
-    Infer ν_m and ν_c at each observer time from synchrotron spectra built with ``jet.Flux``.
-
-    Frequency grid: 1e9–1e19 Hz in ``n_freq_bins`` logarithmic bins; bin flux is converted to
-    F_ν by dividing by bin width. Breaks are estimated with ``_estimate_break_frequencies``.
-
-    Parameters
-    ----------
-    jet, P
-        From ``_jet_and_P(median_params)``.
-    times : array_like
-        Observer times (s).
-
-    Returns
-    -------
-    nu_m_all, nu_c_all : ndarray
-        Same length as ``times``.
-    """
-    times = np.asarray(times, dtype=float)
-    n_time = len(times)
-    nu_edges = np.geomspace(1e9, 1e19, n_freq_bins + 1)
-    nu_lo = nu_edges[:-1]
-    nu_hi = nu_edges[1:]
-    dnu = nu_hi - nu_lo
-    nu_cen = np.sqrt(nu_lo * nu_hi)
-
-    nu_m_all = np.full(n_time, np.nan, dtype=float)
-    nu_c_all = np.full(n_time, np.nan, dtype=float)
-
-    for it, t_obs in enumerate(times):
-        fnu = np.empty_like(nu_cen, dtype=float)
-        for i in range(len(nu_cen)):
-            fband = jet.Flux(
-                t_obs,
-                float(nu_lo[i]),
-                float(nu_hi[i]),
-                P,
-                model="sync",
-                rtol=1e-3,
-                max_iter=100,
-                force_return=True,
-            )
-            fnu[i] = fband / dnu[i] / _MJY_PER_CGS_FNU
-
-        nu_m, nu_c = _estimate_break_frequencies(nu_cen, fnu)
-        nu_m_all[it] = nu_m
-        nu_c_all[it] = nu_c
-
-    return nu_m_all, nu_c_all
-
-
-def compute_break_frequencies_timeseries(median_params, times, n_freq_bins=160):
-    """
-    Break-frequency time series: analytical ISM scalings if ``jetType`` is tophat (case-insensitive),
-    otherwise inferred from ``Jet.Flux`` synchrotron spectra (other jet profiles).
-    """
-    probe = copy.deepcopy(median_params)
-    _expand_jetsimpy_params_inplace(probe)
-    if str(probe["jetType"]).lower() == "tophat":
-        return compute_break_frequencies_tophat_analytical(
-            probe["z"],
-            probe["p"],
-            probe["epse"],
-            probe["epsb"],
-            probe["e0"],
-            probe["n0"],
-            times,
-        )
-    pc = copy.deepcopy(median_params)
-    jet, P = _jet_and_P(pc)
-    return compute_break_frequencies_from_spectrum(jet, P, times, n_freq_bins)
-
-
 def _figure_break_frequency_evolution(times, nu_m_all, nu_c_all, title):
     """Shared figure: ν_m and ν_c vs observer time (log–log). Caller sets matplotlib style."""
     fig, ax = plt.subplots(1, 1, figsize=(8, 5))
@@ -1054,50 +583,18 @@ def _figure_break_frequency_evolution(times, nu_m_all, nu_c_all, title):
 
 def break_frequency_evolution_plot(
     basedir,
-    median_params,
+    plot_data,
     show_plot=False,
     save_plot=True,
-    n_freq_bins=160,
-    n_time=60,
 ):
-    """
-    Plot synchrotron break-frequency evolution (ν_m, ν_c) vs time.
+    """Plot saved synchrotron break frequencies. Does not evaluate the model."""
+    _apply_paper_style(legend_fontsize=10, line_width=0.9)
 
-    For ``jetType=='tophat'``, ν_m and ν_c use analytical scaling laws
-    (``compute_break_frequencies_tophat_analytical``). For other jet types, values are inferred
-    from modeled synchrotron spectra (``compute_break_frequencies_from_spectrum``).
-    """
-    plt.style.use(["science", "high-vis"])
-
-    mpl.rcParams.update(
-        {
-            **_PAPER_SERIF_RC,
-            "font.size": 5,
-            "axes.titlesize": 12,
-            "axes.labelsize": 12,
-            "xtick.labelsize": 12,
-            "ytick.labelsize": 12,
-            "legend.fontsize": 10,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "savefig.dpi": 300,
-            "axes.linewidth": 0.5,
-            "lines.linewidth": 0.9,
-            "xtick.major.width": 0.5,
-            "ytick.major.width": 0.5,
-            "xtick.minor.width": 0.3,
-            "ytick.minor.width": 0.3,
-        }
-    )
-
-    times = np.geomspace(1.0, 1.0e6, num=n_time)
-    nu_m_all, nu_c_all = compute_break_frequencies_timeseries(
-        median_params, times, n_freq_bins=n_freq_bins
-    )
-
-    p = copy.deepcopy(median_params)
-    _expand_jetsimpy_params_inplace(p)
-    if str(p["jetType"]).lower() == "tophat":
+    breaks = plot_data["breaks"]
+    times = np.asarray(breaks["times"], dtype=float)
+    nu_m_all = np.asarray(breaks["nu_m"], dtype=float)
+    nu_c_all = np.asarray(breaks["nu_c"], dtype=float)
+    if breaks["method"] == "analytical":
         title = (
             r"Evolution of $\nu_m$ and $\nu_c$ (analytical scalings, median parameters)"
         )
@@ -1133,8 +630,7 @@ def _sanitize_filename_component(name: str) -> str:
 
 def residual_plot(
     basedir,
-    median_params,
-    observed_data,
+    plot_data,
     filt,
     show_plot=False,
     save_plot=True,
@@ -1143,58 +639,25 @@ def residual_plot(
     """
     Plot fractional residuals (observed − model) / model for one band vs time.
 
-    Uses the same styling as lc_plot but does not draw posterior uncertainty ribbons.
+    Model fluxes come from ``plot_data``; this function does not evaluate the model.
     """
-    settings = lc_plot_settings_default if plot_settings is None else plot_settings
+    settings = _light_curve_style(plot_settings)
     xlim = settings["xlim"]
-    plt.style.use(["science", "high-vis"])
+    _apply_paper_style()
 
-    mpl.rcParams.update(
-        {
-            **_PAPER_SERIF_RC,
-            "font.size": 5,
-            "axes.titlesize": 12,
-            "axes.labelsize": 12,
-            "xtick.labelsize": 12,
-            "ytick.labelsize": 12,
-            "legend.fontsize": 12,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "savefig.dpi": 300,
-            "axes.linewidth": 0.5,
-            "lines.linewidth": 0.75,
-            "xtick.major.width": 0.5,
-            "ytick.major.width": 0.5,
-            "xtick.minor.width": 0.3,
-            "ytick.minor.width": 0.3,
-        }
-    )
-
-    if filt not in filt_freqs:
+    df_allobs = plot_data["observations"]
+    known = set(df_allobs["Filt"].astype(str))
+    if filt not in known:
         logger.warning(
-            "residual_plot: unknown filter %r; known keys include %s",
-            filt,
-            sorted(filt_freqs.keys())[:10],
-        )
-        return
-    if filt not in multipliers:
-        logger.warning(
-            "residual_plot: filter %r has no flux multiplier; skipping.", filt
+            "residual_plot: filter %r is not in the saved observations", filt
         )
         return
 
-    nu = filt_freqs[filt]
-    multiplier = multipliers[filt]
-
-    df_allobs = pd.read_csv(observed_data)
-    df_allobs["Times"] = pd.to_numeric(df_allobs["Times"], errors="coerce")
-    df_allobs["Fluxes"] = pd.to_numeric(df_allobs["Fluxes"], errors="coerce")
-    df_allobs["FluxErrs"] = pd.to_numeric(df_allobs["FluxErrs"], errors="coerce")
-    # Normalize UL column: treat missing/blank as "N"
-    df_allobs = _normalize_ul_column(df_allobs)
+    multiplier = _multiplier_for_band(filt, settings["multipliers"])
+    color = _color_for_band(filt, settings["band_colors"])
 
     det = df_allobs[(df_allobs["Filt"] == filt) & (df_allobs["UL"] == "N")][
-        ["Times", "Fluxes", "FluxErrs"]
+        ["Times", "Fluxes", "FluxErrs", "ModelFlux"]
     ].sort_values(by="Times")
     if len(det) == 0:
         logger.warning(
@@ -1205,9 +668,8 @@ def residual_plot(
     times = det["Times"].to_numpy()
     f_obs = det["Fluxes"].to_numpy()
     f_err = det["FluxErrs"].to_numpy()
+    f_model = det["ModelFlux"].to_numpy(dtype=float)
 
-    f_model = np.asarray(model(times, [nu], median_params))
-    # Avoid divide-by-zero in pathological cases
     tiny = np.finfo(float).tiny
     denom = np.where(np.abs(f_model) > tiny, f_model, np.copysign(tiny, f_model + tiny))
     residual = (f_obs - f_model) / denom
@@ -1230,7 +692,7 @@ def residual_plot(
         fmt="o",
         markersize=4,
         alpha=1,
-        color=band_colors.get(filt, "#616569"),
+        color=color,
         mec="black",
         elinewidth=0.5,
         capsize=2,
@@ -1262,6 +724,13 @@ def residual_plot(
 
 ################################################
 def main():
+    from jsonargparse import ArgumentParser
+    from jetsimpy_model import (
+        PLOT_DATA_FILENAME,
+        compute_plot_data,
+        save_plot_data,
+    )
+
     SAMPLE_USAGE = (
         "Example:\n"
         "  python jetsimpy_plot.py --obsfile data/GRB250916A_cons.csv  "
@@ -1270,7 +739,7 @@ def main():
     )
 
     parser = ArgumentParser(
-        description="Plot GRB afterglow model light curves using jetsimpy and overlay observations.",
+        description="Evaluate the afterglow model, save plot data, then draw figures from that file.",
         epilog=SAMPLE_USAGE,
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -1300,8 +769,8 @@ def main():
         "--spectrum",
         action="store_true",
         help=(
-            "Plot afterglow spectrum F_nu vs frequency using Jet.Flux(); overlay "
-            "detections from --obsfile at fixed epochs (see SPECTRUM_PLOT_TIME_EPOCHS, ±500 s)."
+            "Plot the saved afterglow spectrum F_nu vs frequency and overlay "
+            "detections from --obsfile at the stored epochs."
         ),
     )
     parser.add_argument(
@@ -1315,9 +784,6 @@ def main():
     args = parser.parse_args()
 
     np.random.seed(12)
-
-    # read obs csv
-    file = args.obsfile
 
     # Set up the output directory and logging
     basedir = f"output"
@@ -1353,24 +819,25 @@ def main():
     params['s']=0
     params['z']=args.redshift
     """
+    plot_data = compute_plot_data(
+        args.params,
+        [],
+        args.obsfile,
+        lc_plot_settings_default["xlim"],
+    )
+    plot_data_path = os.path.join(basedir, PLOT_DATA_FILENAME)
+    save_plot_data(plot_data_path, plot_data)
+    logger.info("Saved plot data to %s", plot_data_path)
+
     ran_special_plot = False
     if args.spectrum:
-        df_spectrum_obs = pd.read_csv(args.obsfile)
-        epoch_obs = build_spectrum_epoch_observations(
-            df_spectrum_obs, SPECTRUM_PLOT_TIME_EPOCHS, dt_sec=500.0
-        )
-        spectrum_plot(
-            basedir,
-            args.params,
-            time_epochs=SPECTRUM_PLOT_TIME_EPOCHS,
-            epoch_observations=epoch_obs,
-        )
+        spectrum_plot(basedir, plot_data)
         ran_special_plot = True
     if args.plot_break_frequencies:
-        break_frequency_evolution_plot(basedir, args.params)
+        break_frequency_evolution_plot(basedir, plot_data)
         ran_special_plot = True
     if not ran_special_plot:
-        lc_plot(basedir, args.params, [], args.obsfile)
+        lc_plot(basedir, plot_data)
     """
     params = {}
     params['jetType']=args.jetType
