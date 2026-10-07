@@ -1,10 +1,10 @@
-mpirun -n 15 --oversubscribe -- python multinest_jetsimpy_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc1.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors generic_highp --label generic_highp1 &
-mpirun -n 15 --oversubscribe -- python multinest_jetsimpy_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc1.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors generic_wind --label generic_wind1 &
+mpirun -n 15 --oversubscribe -- python multinest_afterglow_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc1.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors generic_highp --label generic_highp1 &
+mpirun -n 15 --oversubscribe -- python multinest_afterglow_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc1.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors generic_wind --label generic_wind1 &
 
 
 
-mpirun -n 6 --oversubscribe -- python multinest_jetsimpy_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors generic --label generic3 &
-mpirun -n 6 --oversubscribe -- python multinest_jetsimpy_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors 260924A_p28_wind --label p28_wind1 &
-mpirun -n 6 --oversubscribe -- python multinest_jetsimpy_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors 260924A_p28_ism --label p28_ism1 &
-mpirun -n 6 --oversubscribe -- python multinest_jetsimpy_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors 260924A_p3_ism --label p3_ism1 &
-mpirun -n 6 --oversubscribe -- python multinest_jetsimpy_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors 260924A_p247_wind --label p247_wind1 &
+mpirun -n 6 --oversubscribe -- python multinest_afterglow_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors generic --label generic3 &
+mpirun -n 6 --oversubscribe -- python multinest_afterglow_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors 260924A_p28_wind --label p28_wind1 &
+mpirun -n 6 --oversubscribe -- python multinest_afterglow_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors 260924A_p28_ism --label p28_ism1 &
+mpirun -n 6 --oversubscribe -- python multinest_afterglow_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors 260924A_p3_ism --label p3_ism1 &
+mpirun -n 6 --oversubscribe -- python multinest_afterglow_EP_cmlp.py --jetType tophat --livepoints 500 --obsfile data/GRB260924A_trunc.csv --fullobsfile data/GRB260924A.csv -z 3.51 --priors 260924A_p247_wind --label p247_wind1 &

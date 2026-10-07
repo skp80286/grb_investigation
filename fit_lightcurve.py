@@ -691,52 +691,14 @@ def plot_results(data, fits, model, bands, output=None):
 
     # --------------------------------------------------------
     # Shared flux range
-    #
-    # One y-limit for every band panel, set by the lowest and
-    # highest flux drawn across all bands (data, uncertainties,
-    # upper-limit arrows, and model curves).
     # --------------------------------------------------------
 
-    flux_values = []
-
-    for band in bands:
-        df_band = plotted[plotted["Filt"].astype(str) == band]
-        positive = df_band[(df_band["Times"] > 0) & (df_band["Fluxes"] > 0)]
-
-        is_ul = positive["UL"].astype(str).str.upper().isin(["Y", "YES", "TRUE", "1"])
-        detections = positive[~is_ul]
-        upper = positive[is_ul]
-
-        if len(detections) > 0:
-            flux = detections["Fluxes"].to_numpy(dtype=float)
-            ferr = detections["FluxErrs"].to_numpy(dtype=float)
-            ferr = np.where(np.isfinite(ferr), np.abs(ferr), 0.0)
-            flux_values.append(flux + ferr)
-            lower = flux - ferr
-            flux_values.append(lower[lower > 0])
-
-        if len(upper) > 0:
-            flux = upper["Fluxes"].to_numpy(dtype=float)
-            flux_values.append(flux)
-            flux_values.append(0.85 * flux)
-
-        fit = fits.get(band)
-
-        if fit is not None:
-            band_times = df_band.loc[df_band["Times"] > 0, "Times"]
-
-            if len(band_times) > 0:
-                tmodel = np.logspace(
-                    np.log10(float(band_times.min())),
-                    np.log10(float(band_times.max())),
-                    500,
-                )
-                fmodel = 10 ** evaluate_model(np.log10(tmodel), fit["params"], model)
-                flux_values.append(fmodel[fmodel > 0])
-
-    flux_values = np.concatenate(flux_values)
-    f_lo = float(np.min(flux_values))
-    f_hi = float(np.max(flux_values))
+    fluxes = plotted.loc[
+        (plotted["Times"] > 0) & (plotted["Fluxes"] > 0),
+        "Fluxes",
+    ]
+    f_lo = float(fluxes.min())
+    f_hi = float(fluxes.max())
 
     # --------------------------------------------------------
     # Plot each band
@@ -843,7 +805,6 @@ def plot_results(data, fits, model, bands, output=None):
 
         ax.set_xscale("log")
         ax.set_yscale("log")
-        ax.set_ylim(f_lo, f_hi)
 
         if fit is not None:
             label_powerlaw_slopes(ax, tmin, tmax, fit["params"], model, fit_color)
@@ -912,6 +873,7 @@ def plot_results(data, fits, model, bands, output=None):
 
         if len(bands) > 1:
             ax.set_xlim(t_lo, t_hi)
+            ax.set_ylim(f_lo, f_hi)
 
     if output:
         plt.savefig(output, dpi=300, bbox_inches="tight", format="pdf")

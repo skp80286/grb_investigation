@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
-from jetsimpy_plot import band_colors, filt_freqs
+from afterglow_plot import band_colors, filt_freqs
 import matplotlib as mpl
 from matplotlib.ticker import ScalarFormatter
 import scienceplots
