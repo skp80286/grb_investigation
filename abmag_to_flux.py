@@ -35,7 +35,10 @@ def convert(input_csv, output_csv):
     out = df.copy()
     out = out.drop(columns=["AB", "AB_Err"])
 
-    # Insert new columns next to Times
+    # Insert new columns next to Times (replace if they already exist)
+    for col in ("Fluxes", "FluxErrs"):
+        if col in out.columns:
+            out = out.drop(columns=[col])
     out.insert(out.columns.get_loc("Times") + 1, "Fluxes", flux_jy)
     out.insert(out.columns.get_loc("Fluxes") + 1, "FluxErrs", fluxerr_jy)
 

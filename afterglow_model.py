@@ -40,11 +40,9 @@ SPECTRUM_PLOT_TIME_EPOCHS = np.array(
         4e3,
         1e4,
         15934,
-        67050,
-        77800,
-        195000,
+        72000,
+        190000,
         225000,
-        189500.0,
         1e6,
     ],
     dtype=float,
@@ -218,11 +216,11 @@ def _vegas_jet(params):
     Gamma0 = params["lf"]
     jet_type = str(params["jetType"]).lower()
     if jet_type == "gaussian":
-        return GaussianJet(theta_c, E_iso, Gamma0, spreading=True)
+        return GaussianJet(theta_c, E_iso, Gamma0, spreading=False)
     if jet_type == "powerlaw":
         s = params["s"]
-        return PowerLawJet(theta_c, E_iso, Gamma0, s, s, spreading=True)
-    return TophatJet(theta_c, E_iso, Gamma0, spreading=True)
+        return PowerLawJet(theta_c, E_iso, Gamma0, s, s, spreading=False)
+    return TophatJet(theta_c, E_iso, Gamma0, spreading=False)
 
 
 def _build_vegas_model(params):

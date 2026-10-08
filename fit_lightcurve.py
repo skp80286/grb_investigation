@@ -20,6 +20,10 @@ Example:
     python fit_lightcurve.py data/GRB260924A.csv --model broken \
         --bands g r z J
         -> output/GRB260924A_g_r_z_J_broken.pdf
+
+    python fit_lightcurve.py data/GRB260924A.csv --model double \
+        --break-epoch 1e5
+        -> one break fixed at 1e5 s; the other break is free
 """
 
 import argparse
@@ -100,12 +104,56 @@ def double_broken_powerlaw(logt, logF0, alpha1, alpha2, alpha3, logtb1, logtb2):
     return result
 
 
+def expand_params(params, model, logtb_fixed=None):
+    """
+    Insert a fixed break into the parameter vector used by the models.
+
+    With no fixed break, params are already the full vector.
+
+    Broken, fixed break:
+        [logF0, alpha1, alpha2] -> [..., logtb_fixed]
+
+    Double broken, fixed break:
+        [logF0, alpha1, alpha2, alpha3, logtb_free]
+        -> breaks ordered so tb1 <= tb2, one of them equal to the epoch.
+    """
+
+    params = np.asarray(params, dtype=float)
+
+    if logtb_fixed is None:
+        return params
+
+    if model == "broken":
+        return np.array([params[0], params[1], params[2], logtb_fixed])
+
+    if model == "double":
+        logtb1, logtb2 = np.sort([logtb_fixed, params[4]])
+
+        return np.array(
+            [params[0], params[1], params[2], params[3], logtb1, logtb2]
+        )
+
+    raise ValueError(f"A fixed break is not used with model: {model}")
+
+
+def fixed_break_index(full_params, logtb_fixed):
+    """Index of the break parameter that matches the forced epoch."""
+
+    if len(full_params) == 4:
+        return 3
+
+    if abs(full_params[4] - logtb_fixed) <= abs(full_params[5] - logtb_fixed):
+        return 4
+
+    return 5
+
+
 # ============================================================
 # Initial guesses
 # ============================================================
 
 
-def initial_guess(logt, logf, model):
+def initial_guess(logt, logf, model, logtb_fixed=None):
     """
     Construct robust initial guesses.
 
@@ -142,8 +190,8 @@ def initial_guess(logt, logf, model):
     # --------------------------------------------------------
 
     elif model == "broken":
-        # Break near middle of time range
-        logtb = np.median(logt)
+        # Break near middle of time range, unless one epoch is forced.
+        logtb = np.median(logt) if logtb_fixed is None else logtb_fixed
 
         # Estimate slopes independently on either side
         before = logt <= logtb
@@ -166,6 +214,9 @@ def initial_guess(logt, logf, model):
 
         logF0 = np.median(logf + alpha1 * logt)
 
+        if logtb_fixed is not None:
+            return np.array([logF0, alpha1, alpha2])
+
         return np.array([logF0, alpha1, alpha2, logtb])
 
     # --------------------------------------------------------
@@ -173,9 +224,23 @@ def initial_guess(logt, logf, model):
     # --------------------------------------------------------
 
     elif model == "double":
-        # Divide the logarithmic time range into thirds
-        logtb1 = logt_min + (logt_max - logt_min) / 3.0
-        logtb2 = logt_min + 2.0 * (logt_max - logt_min) / 3.0
+        if logtb_fixed is None:
+            # Divide the logarithmic time range into thirds
+            logtb1 = logt_min + (logt_max - logt_min) / 3.0
+            logtb2 = logt_min + 2.0 * (logt_max - logt_min) / 3.0
+
+        else:
+            # Put the free break on the side of the epoch with more data.
+            left_span = logtb_fixed - logt_min
+            right_span = logt_max - logtb_fixed
+
+            if right_span >= left_span:
+                logtb_free = logtb_fixed + 0.5 * max(right_span, 0.1)
+
+            else:
+                logtb_free = logtb_fixed - 0.5 * max(left_span, 0.1)
+
+            logtb1, logtb2 = np.sort([logtb_fixed, logtb_free])
 
         before = logt <= logtb1
         middle = (logt > logtb1) & (logt <= logtb2)
@@ -208,6 +273,11 @@ def initial_guess(logt, logf, model):
 
         logF0 = np.median(logf + alpha1 * logt)
 
+        if logtb_fixed is not None:
+            logtb_free = logtb2 if np.isclose(logtb1, logtb_fixed) else logtb1
+
+            return np.array([logF0, alpha1, alpha2, alpha3, logtb_free])
+
         return np.array([logF0, alpha1, alpha2, alpha3, logtb1, logtb2])
 
     else:
@@ -239,7 +309,9 @@ def evaluate_model(logt, params, model):
 # ============================================================
 
 
-def residuals(params, logt, logf, sigma_logf, model):
+def residuals(params, logt, logf, sigma_logf, model, logtb_fixed=None):
+
+    params = expand_params(params, model, logtb_fixed)
 
     # Explicitly reject invalid double-break ordering
     if model == "double":
@@ -261,7 +333,7 @@ def residuals(params, logt, logf, sigma_logf, model):
 # ============================================================
 
 
-def parameter_bounds(logt, logf, model):
+def parameter_bounds(logt, logf, model, logtb_fixed=None):
 
     logt_min = np.min(logt)
     logt_max = np.max(logt)
@@ -282,14 +354,26 @@ def parameter_bounds(logt, logf, model):
         upper = np.array([upper_logF, 10.0])
 
     elif model == "broken":
-        lower = np.array([lower_logF, -10.0, -10.0, lower_tb])
+        if logtb_fixed is None:
+            lower = np.array([lower_logF, -10.0, -10.0, lower_tb])
 
-        upper = np.array([upper_logF, 10.0, 10.0, upper_tb])
+            upper = np.array([upper_logF, 10.0, 10.0, upper_tb])
+
+        else:
+            lower = np.array([lower_logF, -10.0, -10.0])
+
+            upper = np.array([upper_logF, 10.0, 10.0])
 
     elif model == "double":
-        lower = np.array([lower_logF, -10.0, -10.0, -10.0, lower_tb, lower_tb])
+        if logtb_fixed is None:
+            lower = np.array([lower_logF, -10.0, -10.0, -10.0, lower_tb, lower_tb])
 
-        upper = np.array([upper_logF, 10.0, 10.0, 10.0, upper_tb, upper_tb])
+            upper = np.array([upper_logF, 10.0, 10.0, 10.0, upper_tb, upper_tb])
+
+        else:
+            lower = np.array([lower_logF, -10.0, -10.0, -10.0, lower_tb])
+
+            upper = np.array([upper_logF, 10.0, 10.0, 10.0, upper_tb])
 
     else:
         raise ValueError(f"Unknown model: {model}")
@@ -302,7 +386,7 @@ def parameter_bounds(logt, logf, model):
 # ============================================================
 
 
-def make_feasible_initial_guess(p0, lower, upper, model):
+def make_feasible_initial_guess(p0, lower, upper, model, logtb_fixed=None):
 
     p0 = np.asarray(p0, dtype=float).copy()
 
@@ -320,7 +404,19 @@ def make_feasible_initial_guess(p0, lower, upper, model):
     # Explicitly enforce break ordering
     # --------------------------------------------------------
 
-    if model == "double":
+    if model == "double" and logtb_fixed is not None:
+        # Keep the free break away from the forced epoch so the
+        # middle segment is not degenerate at the start.
+        if abs(p0[4] - logtb_fixed) < 1e-4:
+            if (logtb_fixed - lower[4]) >= (upper[4] - logtb_fixed):
+                p0[4] = logtb_fixed - 0.2 * (logtb_fixed - lower[4])
+
+            else:
+                p0[4] = logtb_fixed + 0.2 * (upper[4] - logtb_fixed)
+
+        p0[4] = np.clip(p0[4], lower[4] + eps, upper[4] - eps)
+
+    elif model == "double":
         tb1 = p0[4]
         tb2 = p0[5]
 
@@ -375,7 +471,7 @@ def minimum_points(model):
 # ============================================================
 
 
-def fit_band(df_band, model):
+def fit_band(df_band, model, break_epoch=None):
 
     # --------------------------------------------------------
     # Remove upper limits from fit
@@ -423,6 +519,17 @@ def fit_band(df_band, model):
     logt = np.log10(t)
     logf = np.log10(f)
 
+    logtb_fixed = None
+
+    if break_epoch is not None:
+        logtb_fixed = np.log10(break_epoch)
+
+        if break_epoch < t.min() or break_epoch > t.max():
+            print(
+                f"  Fixed break at {break_epoch:.3g} s is outside the "
+                f"detection range {t.min():.3g}–{t.max():.3g} s"
+            )
+
     # Propagation:
     #
     # sigma(log10 F) = sigma_F / (F ln 10)
@@ -436,13 +543,13 @@ def fit_band(df_band, model):
     # Initial guess
     # --------------------------------------------------------
 
-    p0 = initial_guess(logt, logf, model)
+    p0 = initial_guess(logt, logf, model, logtb_fixed)
 
     # --------------------------------------------------------
     # Bounds
     # --------------------------------------------------------
 
-    lower, upper = parameter_bounds(logt, logf, model)
+    lower, upper = parameter_bounds(logt, logf, model, logtb_fixed)
 
     # --------------------------------------------------------
     # IMPORTANT FIX:
@@ -450,7 +557,7 @@ def fit_band(df_band, model):
     # Ensure x0 lies inside bounds.
     # --------------------------------------------------------
 
-    p0 = make_feasible_initial_guess(p0, lower, upper, model)
+    p0 = make_feasible_initial_guess(p0, lower, upper, model, logtb_fixed)
 
     # --------------------------------------------------------
     # Fit
@@ -459,7 +566,7 @@ def fit_band(df_band, model):
     result = least_squares(
         residuals,
         p0,
-        args=(logt, logf, sigma_logf, model),
+        args=(logt, logf, sigma_logf, model, logtb_fixed),
         bounds=(lower, upper),
         max_nfev=10000,
         loss="linear",
@@ -469,13 +576,15 @@ def fit_band(df_band, model):
     # Calculate statistics
     # --------------------------------------------------------
 
-    best_params = result.x
+    best_free = result.x
 
-    res = residuals(best_params, logt, logf, sigma_logf, model)
+    best_params = expand_params(best_free, model, logtb_fixed)
+
+    res = residuals(best_free, logt, logf, sigma_logf, model, logtb_fixed)
 
     chi2 = np.sum(res**2)
 
-    k = len(best_params)
+    k = len(best_free)
 
     dof = n - k
 
@@ -499,10 +608,18 @@ def fit_band(df_band, model):
 
         covariance = np.linalg.inv(jtj) * reduced_chi2
 
-        errors = np.sqrt(np.diag(covariance))
+        errors_free = np.sqrt(np.diag(covariance))
+
+        errors = _embed_free_errors(
+            errors_free, model, best_params, logtb_fixed
+        )
+
+        covariance = _embed_free_covariance(
+            covariance, model, best_params, logtb_fixed
+        )
 
     except np.linalg.LinAlgError:
-        errors = np.full(k, np.nan)
+        errors = np.full(len(best_params), np.nan)
 
     return {
         "params": best_params,
@@ -522,7 +639,47 @@ def fit_band(df_band, model):
         "bic": bic,
         "n": n,
         "model": model,
+        "break_epoch": break_epoch,
+        "logtb_fixed": logtb_fixed,
     }
+
+
+def _free_parameter_indices(model, full_params, logtb_fixed):
+    """Positions in the full parameter vector that were optimized."""
+
+    if logtb_fixed is None:
+        return np.arange(len(full_params))
+
+    if model == "broken":
+        return np.array([0, 1, 2])
+
+    fixed_at = fixed_break_index(full_params, logtb_fixed)
+
+    free = [0, 1, 2, 3, 4 if fixed_at == 5 else 5]
+
+    return np.array(free)
+
+
+def _embed_free_errors(errors_free, model, full_params, logtb_fixed):
+
+    errors = np.zeros(len(full_params))
+
+    errors[_free_parameter_indices(model, full_params, logtb_fixed)] = errors_free
+
+    return errors
+
+
+def _embed_free_covariance(covariance_free, model, full_params, logtb_fixed):
+
+    n = len(full_params)
+
+    covariance = np.zeros((n, n))
+
+    idx = _free_parameter_indices(model, full_params, logtb_fixed)
+
+    covariance[np.ix_(idx, idx)] = covariance_free
+
+    return covariance
 
 
 # ============================================================
@@ -563,7 +720,9 @@ def print_fit_result(band, fit):
 
         print(f"alpha2 = {p[2]:.5f} +/- {e[2]:.5f}")
 
-        print(f"log10(tb/s) = {p[3]:.5f} +/- {e[3]:.5f}")
+        tb_fixed = fit.get("logtb_fixed") is not None
+
+        print(f"log10(tb/s) = {_format_value(p[3], e[3], tb_fixed)}")
 
         print(f"tb = {10 ** p[3]:.3g} s")
 
@@ -576,13 +735,26 @@ def print_fit_result(band, fit):
 
         print(f"alpha3 = {p[3]:.5f} +/- {e[3]:.5f}")
 
-        print(f"log10(tb1/s) = {p[4]:.5f} +/- {e[4]:.5f}")
+        fixed_at = None
 
-        print(f"log10(tb2/s) = {p[5]:.5f} +/- {e[5]:.5f}")
+        if fit.get("logtb_fixed") is not None:
+            fixed_at = fixed_break_index(p, fit["logtb_fixed"])
+
+        print(f"log10(tb1/s) = {_format_value(p[4], e[4], fixed_at == 4)}")
+
+        print(f"log10(tb2/s) = {_format_value(p[5], e[5], fixed_at == 5)}")
 
         print(f"tb1 = {10 ** p[4]:.3g} s")
 
         print(f"tb2 = {10 ** p[5]:.3g} s")
+
+
+def _format_value(value, error, fixed):
+
+    if fixed:
+        return f"{value:.5f} (fixed)"
+
+    return f"{value:.5f} +/- {error:.5f}"
 
 
 # ============================================================
@@ -656,6 +828,27 @@ def label_powerlaw_slopes(ax, tmin, tmax, params, model, color):
             clip_on=False,
             zorder=5,
         )
+
+
+def mark_break(ax, axres, tb):
+    """Draw a break and label it with the epoch in seconds."""
+
+    ax.axvline(tb, linestyle=":", linewidth=1.5)
+
+    axres.axvline(tb, linestyle=":", linewidth=1.5)
+
+    ax.text(
+        tb,
+        0.98,
+        f"{tb:.3g} s",
+        transform=ax.get_xaxis_transform(),
+        rotation=90,
+        ha="right",
+        va="top",
+        fontsize=9,
+        clip_on=False,
+        zorder=6,
+    )
 
 
 def plot_results(data, fits, model, bands, output=None):
@@ -847,23 +1040,11 @@ def plot_results(data, fits, model, bands, output=None):
             p = fit["params"]
 
             if model == "broken":
-                tb = 10 ** p[3]
-
-                ax.axvline(tb, linestyle=":", linewidth=1.5)
-
-                axres.axvline(tb, linestyle=":", linewidth=1.5)
+                mark_break(ax, axres, 10 ** p[3])
 
             elif model == "double":
-                tb1 = 10 ** p[4]
-                tb2 = 10 ** p[5]
-
-                ax.axvline(tb1, linestyle=":", linewidth=1.5)
-
-                ax.axvline(tb2, linestyle=":", linewidth=1.5)
-
-                axres.axvline(tb1, linestyle=":", linewidth=1.5)
-
-                axres.axvline(tb2, linestyle=":", linewidth=1.5)
+                mark_break(ax, axres, 10 ** p[4])
+                mark_break(ax, axres, 10 ** p[5])
 
         # ----------------------------------------------------
         # X label and shared limits
@@ -914,6 +1095,17 @@ def main():
     )
 
     parser.add_argument(
+        "--break-epoch",
+        type=float,
+        default=None,
+        help=(
+            "Force one break at this time (seconds since trigger). "
+            "Used with --model broken (the only break) or double "
+            "(one break fixed, the other free)."
+        ),
+    )
+
+    parser.add_argument(
         "--output",
         default=None,
         help=(
@@ -923,6 +1115,13 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.break_epoch is not None:
+        if args.model not in ("broken", "double"):
+            parser.error("--break-epoch requires --model broken or double")
+
+        if args.break_epoch <= 0:
+            parser.error("--break-epoch must be positive (seconds since trigger)")
 
     # --------------------------------------------------------
     # Read data
@@ -970,6 +1169,9 @@ def main():
 
     print(f"Bands : {', '.join(bands)}")
 
+    if args.break_epoch is not None:
+        print(f"Break : {args.break_epoch:.6g} s (fixed)")
+
     if args.output is None:
         stem = Path(args.input).stem
         band_part = "_".join(bands)
@@ -994,7 +1196,7 @@ def main():
 
         df_band = data[data["Filt"].astype(str) == band].copy()
 
-        fit = fit_band(df_band, args.model)
+        fit = fit_band(df_band, args.model, args.break_epoch)
 
         fits[band] = fit
 

@@ -480,6 +480,37 @@ def lc_plot(
 _SEC_PER_DAY = 86400.0
 
 
+def _end_spectral_slope(nu, fnu, i0, i1):
+    """Power-law index β in F_ν ∝ ν^β between two frequency samples."""
+    nu0, nu1 = float(nu[i0]), float(nu[i1])
+    f0, f1 = float(fnu[i0]), float(fnu[i1])
+    if not (nu0 > 0 and nu1 > 0 and f0 > 0 and f1 > 0 and nu0 != nu1):
+        return None
+    beta = np.log(f1 / f0) / np.log(nu1 / nu0)
+    return np.sqrt(nu0 * nu1), np.sqrt(f0 * f1), beta
+
+
+def _label_spectrum_end_slopes(ax, nu, fnu, color):
+    """Label β at the two lowest frequencies and the two highest frequencies."""
+    for i0, i1 in ((0, 1), (-2, -1)):
+        marked = _end_spectral_slope(nu, fnu, i0, i1)
+        if marked is None:
+            continue
+        nu_mid, f_mid, beta = marked
+        ax.annotate(
+            rf"$\beta={beta:.2f}$",
+            xy=(nu_mid, f_mid),
+            xytext=(0, 5),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            color=color,
+            fontsize=9,
+            annotation_clip=True,
+            zorder=6,
+        )
+
+
 def spectrum_plot(
     basedir,
     plot_data,
@@ -516,6 +547,7 @@ def spectrum_plot(
             linestyle="-",
             label=f"{t_obs / _SEC_PER_DAY:.4g} d",
         )
+        _label_spectrum_end_slopes(ax, nu_c, fnu_all[it], colors[it])
 
         obs_list = obs_by_epoch[it]
         if obs_list:

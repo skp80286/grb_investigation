@@ -55,7 +55,7 @@ priors_generic = {
     # Viewing angle [rad]
     "logthv": {"low": -2.5, "high": 0.5},  # ~0.003–3 rad
     # Electron spectral index
-    "p": {"low": 2.01, "high": 3.0},
+    "p": {"low": 2.01, "high": 3.5},
     # Jet structure power-law index
     "s": {"low": 1, "high": 8},
     # log initial Lorentz factor
@@ -102,7 +102,7 @@ priors_generic_wind = {
     # Viewing angle [rad]
     "logthv": {"low": -2.5, "high": 0.5},  # ~0.003–3 rad
     # Electron spectral index
-    "p": {"low": 2.01, "high": 3.0},
+    "p": {"low": 2.01, "high": 3.5},
     # Jet structure power-law index
     "s": {"low": 1, "high": 8},
     # log initial Lorentz factor
@@ -125,7 +125,7 @@ priors_generic_ism_plus_wind = {
     # Viewing angle [rad]
     "logthv": {"low": -2.5, "high": 0.5},  # ~0.003–3 rad
     # Electron spectral index
-    "p": {"low": 2.01, "high": 3.0},
+    "p": {"low": 2.01, "high": 3.5},
     # Jet structure power-law index
     "s": {"low": 1, "high": 8},
     # log initial Lorentz factor
@@ -610,6 +610,99 @@ priors_260924A_p3_ism = {
     # Wind-like medium parameter
     "logA": {"low": 0.0, "high": 0.0},  # Wind medium strongly motivated
 }
+
+priors_GRB260924A_wind = {
+    # Isotropic equivalent energy [erg] — wide range to accommodate various energies
+    "loge0": {"low": 49, "high": 56},
+    # Magnetic field equipartition fraction
+    "logepsb": {"low": -6, "high": -1},
+    # Electron equipartition fraction
+    "logepse": {"low": -2.5, "high": -0.3},
+    # ISM number density [cm^-3]. Set to 0 for pure wind.
+    "n0": {"low": 0.0, "high": 0.0},
+    # Half-opening angle of jet core [rad]
+    "logthc": {"low": -1.824, "high": -1.296},
+    # Viewing angle [rad]
+    "logthv": {"low": -2.5, "high": 0.5},  # ~0.003–3 rad
+    # Electron spectral index
+    "p": {"low": 2.1, "high": 2.1},
+    # Jet structure power-law index
+    "s": {"low": 1, "high": 8},
+    # log initial Lorentz factor
+    "loglf": {"low": 1.0, "high": 4.0},  # Γ₀ ~ 10–10,000
+    # Wind-like medium parameter
+    "logA": {"low": -3.0, "high": 1.0},  # Wind medium strongly motivated
+}
+
+priors_GRB260924A_ism_plus_wind = {
+    # Isotropic equivalent energy [erg] — wide range to accommodate various energies
+    "loge0": {"low": 49, "high": 56},
+    # Magnetic field equipartition fraction
+    "logepsb": {"low": -6, "high": -1},
+    # Electron equipartition fraction
+    "logepse": {"low": -2.5, "high": -0.3},
+    # ISM number density [cm^-3]
+    "logn0": {"low": -3.0, "high": 1.0},
+    # Half-opening angle of jet core [rad]
+    "logthc": {"low": -1.824, "high": -1.296},
+    # Viewing angle [rad]
+    "logthv": {"low": -2.5, "high": 0.5},  # ~0.003–3 rad
+    # Electron spectral index
+    "p": {"low": 2.1, "high": 2.1},
+    # Jet structure power-law index
+    "s": {"low": 1, "high": 8},
+    # log initial Lorentz factor
+    "loglf": {"low": 1.0, "high": 4.0},  # Γ₀ ~ 10–10,000
+    # Wind-like medium parameter
+    "logA": {"low": -3.0, "high": 1.0},  # Wind medium strongly motivated
+}
+
+priors_ism_plus_wind_fixlf = {
+    # Isotropic equivalent energy [erg] — wide range to accommodate various energies
+    "loge0": {"low": 49, "high": 56},
+    # Magnetic field equipartition fraction
+    "logepsb": {"low": -6, "high": -1},
+    # Electron equipartition fraction
+    "logepse": {"low": -2.5, "high": -0.3},
+    # ISM number density [cm^-3]
+    "logn0": {"low": -3.0, "high": 1.0},
+    # Half-opening angle of jet core [rad]
+    "logthc": {"low": -2.5, "high": -0.2},  # ~0.003–0.6 rad
+    # Viewing angle [rad]
+    "logthv": {"low": -2.5, "high": 0.5},  # ~0.003–3 rad
+    # Electron spectral index
+    "p": {"low": 2.01, "high": 3.5},
+    # Jet structure power-law index
+    "s": {"low": 1, "high": 8},
+    # log initial Lorentz factor
+    "loglf": {"low": 3.0, "high": 3.0},  # Γ₀ ~ 10–10,000
+    # Wind-like medium parameter
+    "logA": {"low": -3.0, "high": 1.0},  # Wind medium strongly motivated
+}
+
+priors_wind_fixlf = {
+    # Isotropic equivalent energy [erg] — wide range to accommodate various energies
+    "loge0": {"low": 49, "high": 56},
+    # Magnetic field equipartition fraction
+    "logepsb": {"low": -6, "high": -1},
+    # Electron equipartition fraction
+    "logepse": {"low": -2.5, "high": -0.3},
+    # ISM number density [cm^-3]
+    "n0": {"low": 0.0, "high": 0.0},
+    # Half-opening angle of jet core [rad]
+    "logthc": {"low": -2.5, "high": -0.2},  # ~0.003–0.6 rad
+    # Viewing angle [rad]
+    "logthv": {"low": -2.5, "high": 0.5},  # ~0.003–3 rad
+    # Electron spectral index
+    "p": {"low": 2.01, "high": 3.5},
+    # Jet structure power-law index
+    "s": {"low": 1, "high": 8},
+    # log initial Lorentz factor
+    "loglf": {"low": 3.0, "high": 3.0},  # Γ₀ ~ 10–10,000
+    # Wind-like medium parameter
+    "logA": {"low": -3.0, "high": 1.0},  # Wind medium strongly motivated
+}
+
 # Map of available priors sets
 priors_map = {
     "generic": priors_generic,
@@ -648,4 +741,8 @@ priors_map = {
     "generic_highp": priors_generic_highp,
     "generic_wind": priors_generic_wind,
     "generic_ism_plus_wind": priors_generic_ism_plus_wind,
+    "GRB260924A_wind": priors_GRB260924A_wind,
+    "GRB260924A_ism_plus_wind": priors_GRB260924A_ism_plus_wind,
+    "ism_plus_wind_fixlf": priors_ism_plus_wind_fixlf,
+    "wind_fixlf": priors_wind_fixlf,
 }
