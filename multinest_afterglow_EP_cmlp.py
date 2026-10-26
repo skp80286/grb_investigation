@@ -48,6 +48,7 @@ from afterglow_model import (
 )
 from afterglow_plot import (
     break_frequency_evolution_plot,
+    characteristic_trajectory_plot,
     lc_plot,
     residual_plot,
     spectrum_plot,
@@ -65,9 +66,14 @@ chat_id = os.environ["Tele_Transient_chat_id"]
 
 
 def params_for_jetsimpy_model(params):
-    """Copy params for model(); with --use_ksi, set logthv from logksi + logthc (thv = xi * thc)."""
+    """Copy params for model().
+
+    Sets ``spreading`` from ``--spreading``. With ``--use_ksi``, sets logthv
+    from logksi + logthc (thv = xi * thc).
+    """
 
     p = dict(params)
+    p["spreading"] = bool(args.spreading)
 
     if args.use_ksi:
         if "logksi" in p:
@@ -207,6 +213,33 @@ def numbers_only_title(val, q, labels):
     return f"{val:.3f}$^{{+{q[1] - val:.2f}}}_{{-{val - q[0]:.2f}}}$"
 
 
+def draw_figures(basedir, plot_data):
+    """Draw light-curve and optional diagnostic figures from plot arrays."""
+    lc_plot(
+        basedir,
+        plot_data,
+        hide_z_text=args.hide_z_text,
+        plot_settings=lc_plot_settings,
+    )
+
+    if args.plot_spectrum:
+        spectrum_plot(basedir, plot_data)
+        characteristic_trajectory_plot(basedir, plot_data)
+
+    if args.plot_break_frequencies:
+        break_frequency_evolution_plot(basedir, plot_data)
+
+    if args.plot_residuals.strip():
+        for filt in (s.strip() for s in args.plot_residuals.split(",") if s.strip()):
+            logger.info("Creating residual plot for filter %r", filt)
+            residual_plot(
+                basedir,
+                plot_data,
+                filt=filt,
+                plot_settings=lc_plot_settings,
+            )
+
+
 ################################################
 
 comm = MPI.COMM_WORLD
@@ -217,15 +250,36 @@ size = comm.Get_size()
 parser = argparse.ArgumentParser()
 parser.add_argument("--jetType", type=str, default="tophat")
 add_afterglow_library_argument(parser)
+parser.add_argument(
+    "--spreading",
+    action=argparse.BooleanOptionalAction,
+    default=False,
+    help=(
+        "Enable lateral jet spreading in VegasAfterglow. "
+        "Use --no-spreading to turn it off (default)."
+    ),
+)
 parser.add_argument("--livepoints", type=int, default=500)
 parser.add_argument("--label", type=str, default="")
 parser.add_argument("--obsfile", type=str, default="multinest_EP/mcmc_df_trunc.csv")
 parser.add_argument("--fullobsfile", type=str, default="multinest_EP/mcmc_df.csv")
 parser.add_argument("--alert", action="store_true", help="Enable telegram alert.")
-parser.add_argument(
+run_mode = parser.add_mutually_exclusive_group()
+run_mode.add_argument(
     "--post_process_only",
     action="store_true",
-    help="Only postprocess using previous analysis.",
+    help=(
+        "Skip sampling. Recompute plot data from the posterior median "
+        "parameters of a previous run, then draw the figures."
+    ),
+)
+run_mode.add_argument(
+    "--plot-only",
+    action="store_true",
+    help=(
+        "Skip sampling and model evaluation. Draw figures again from the "
+        "saved plot data."
+    ),
 )
 parser.add_argument(
     "--use_band_weights",
@@ -300,9 +354,8 @@ parser.add_argument(
 )
 parser.add_argument(
     "--overweight_errors",
-    type=float,
-    default=1.0,
-    help="Overweight errors by this factor (default: 1.0)",
+    action="store_true",
+    help="Floor each flux error at 10%% of its flux; leave larger errors unchanged.",
 )
 args = parser.parse_args()
 set_afterglow_library(args.library)
@@ -345,6 +398,7 @@ logger = logging.getLogger(__name__)
 
 logger.info(f"Commandline: {' '.join(sys.argv)}")
 logger.info("Afterglow library: %s", args.library)
+logger.info("Vegas jet spreading: %s", args.spreading)
 
 # setup for the params
 """
@@ -456,7 +510,7 @@ param_names_greeks = [
 # param_names_greeks = [r"$\log_{10}(\epsilon_{B})$",  r"$\log_{10}(\epsilon_{e})$", r"$\theta_{c}$", r"$\theta_{v}$", r"$\Gamma_0$"]
 
 band_weights = {"X-ray": 3, "radio": 3, "i": 2}
-if not args.post_process_only:
+if not args.post_process_only and not args.plot_only:
     logger.info(f"######### Priors: #########")
     for key, value in priors_uniform.items():
         logger.info(f"{key}: {value}")
@@ -499,9 +553,15 @@ if not args.post_process_only:
     obs_nu = data["Freqs"].to_numpy()  # in Hz
     obs_flux = data["Fluxes"].to_numpy()  # in mJy
     obs_flux_err = data["FluxErrs"].to_numpy()  # in mJy
-    if args.overweight_errors > 0:
-        obs_flux_err = obs_flux_err * args.overweight_errors
-        logger.info(f"Overweighted errors by {args.overweight_errors}x")
+    if args.overweight_errors:
+        min_err = 0.1 * obs_flux
+        n_floored = int(np.sum(obs_flux_err < min_err))
+        obs_flux_err = np.maximum(obs_flux_err, min_err)
+        logger.info(
+            "Floored flux errors at 10%% of flux for %d/%d points",
+            n_floored,
+            len(obs_flux_err),
+        )
 
     if args.use_ul and "UL" in data.columns:
         obs_ul = (
@@ -572,6 +632,18 @@ if not args.post_process_only:
 
 if rank != 0:
     sys.exit(0)
+
+plot_data_path = os.path.join(basedir, PLOT_DATA_FILENAME)
+if args.plot_only:
+    if not os.path.isfile(plot_data_path):
+        raise FileNotFoundError(
+            f"Plot data file not found: {plot_data_path}. "
+            "Run a fit or --post_process_only first so the model curves are saved."
+        )
+    logger.info("Loading plot data from %s", plot_data_path)
+    draw_figures(basedir, load_plot_data(plot_data_path))
+    sys.exit(0)
+
 if rank == 0:  # Only one process does the analysis
     logger.info(f"Process {rank}: Analyzing results.")
     time.sleep(3)  # artificial barrier
@@ -716,49 +788,18 @@ if rank == 0:  # Only one process does the analysis
         sig3_params.append(params_for_jetsimpy_model(params))
     logger.info(f"3 Sigma parameters: {sig3_params[:10]}")
 
-    plot_data_path = os.path.join(basedir, PLOT_DATA_FILENAME)
-    if args.post_process_only:
-        if not os.path.isfile(plot_data_path):
-            raise FileNotFoundError(
-                f"Plot data file not found: {plot_data_path}. "
-                "Run without --post_process_only so the model curves are saved."
-            )
-        logger.info("Loading plot data from %s", plot_data_path)
-        plot_data = load_plot_data(plot_data_path)
-    else:
-        logger.info("Evaluating model curves for plotting")
-        plot_data = compute_plot_data(
-            params_for_jetsimpy_model(median_params),
-            sig3_params,
-            args.fullobsfile,
-            lc_plot_settings["xlim"],
-            library=args.library,
-        )
-        save_plot_data(plot_data_path, plot_data)
-        logger.info("Saved plot data to %s", plot_data_path)
-
-    lc_plot(
-        basedir,
-        plot_data,
-        hide_z_text=args.hide_z_text,
-        plot_settings=lc_plot_settings,
+    logger.info("Evaluating model curves for plotting from median parameters")
+    plot_data = compute_plot_data(
+        params_for_jetsimpy_model(median_params),
+        sig3_params,
+        args.fullobsfile,
+        lc_plot_settings["xlim"],
+        library=args.library,
     )
+    save_plot_data(plot_data_path, plot_data)
+    logger.info("Saved plot data to %s", plot_data_path)
 
-    if args.plot_spectrum:
-        spectrum_plot(basedir, plot_data)
-
-    if args.plot_break_frequencies:
-        break_frequency_evolution_plot(basedir, plot_data)
-
-    if args.plot_residuals.strip():
-        for filt in (s.strip() for s in args.plot_residuals.split(",") if s.strip()):
-            logger.info("Creating residual plot for filter %r", filt)
-            residual_plot(
-                basedir,
-                plot_data,
-                filt=filt,
-                plot_settings=lc_plot_settings,
-            )
+    draw_figures(basedir, plot_data)
 
     if args.alert:
         message = (

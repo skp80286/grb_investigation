@@ -38,12 +38,10 @@ SPECTRUM_PLOT_TIME_EPOCHS = np.array(
     [
         1e3,
         4e3,
-        1e4,
         15934,
         72000,
-        190000,
-        225000,
-        1e6,
+        210600,
+        826000,
     ],
     dtype=float,
 )
@@ -208,19 +206,23 @@ def _vegas_medium(n0, nwind):
 
 
 def _vegas_jet(params):
-    """Map jetType / thc / e0 / lf / s onto a spreading VegasAfterglow jet."""
+    """Map jetType / thc / e0 / lf / s onto a VegasAfterglow jet.
+
+    Lateral spreading follows ``params['spreading']`` (default False).
+    """
     from VegasAfterglow import GaussianJet, PowerLawJet, TophatJet
 
     theta_c = params["thc"]
     E_iso = params["e0"]
     Gamma0 = params["lf"]
+    spreading = bool(params.get("spreading", True))
     jet_type = str(params["jetType"]).lower()
     if jet_type == "gaussian":
-        return GaussianJet(theta_c, E_iso, Gamma0, spreading=False)
+        return GaussianJet(theta_c, E_iso, Gamma0, spreading=spreading)
     if jet_type == "powerlaw":
         s = params["s"]
-        return PowerLawJet(theta_c, E_iso, Gamma0, s, s, spreading=False)
-    return TophatJet(theta_c, E_iso, Gamma0, spreading=False)
+        return PowerLawJet(theta_c, E_iso, Gamma0, s, s, spreading=spreading)
+    return TophatJet(theta_c, E_iso, Gamma0, spreading=spreading)
 
 
 def _build_vegas_model(params):
@@ -443,10 +445,10 @@ def _spectrum_on_grid(jet, P, times, n_freq_bins):
     return nu_c, fnu
 
 
-def build_spectrum_epoch_observations(df_allobs, epochs, dt_sec=500.0):
+def build_spectrum_epoch_observations(df_allobs, epochs, dt_frac=0.04):
     """
-    For each entry in ``epochs``, collect detections with ``Times`` within ±``dt_sec``
-    seconds of that epoch.
+    For each entry in ``epochs``, collect detections whose ``Times`` satisfy
+    ``|t - t_epoch| <= dt_frac * |t_epoch|``.
 
     Each returned observation is ``(nu_hz, flux_mjy, flux_err_mjy)`` from columns
     ``Freqs``, ``Fluxes``, ``FluxErrs``. If ``UL`` is present, only rows with
@@ -466,7 +468,12 @@ def build_spectrum_epoch_observations(df_allobs, epochs, dt_sec=500.0):
     t_arr = df["Times"].to_numpy(dtype=float)
     out = []
     for t0 in np.asarray(epochs, dtype=float):
-        m = np.abs(t_arr - t0) <= float(dt_sec)
+        if np.isfinite(t0) and t0 != 0:
+            m = np.isfinite(t_arr) & (
+                np.abs(t_arr - float(t0)) <= float(dt_frac) * abs(float(t0))
+            )
+        else:
+            m = np.zeros(t_arr.shape, dtype=bool)
         sub = df.loc[m]
         if len(sub) == 0:
             out.append([])
@@ -512,6 +519,85 @@ def _vegas_spectrum_on_grid(params, times, n_freq_bins):
     return nu_c, fnu
 
 
+def _interp_loglog(t_src, y_src, t_dst):
+    """Interpolate positive ``y_src(t_src)`` onto ``t_dst`` in log–log space."""
+    t_src = np.asarray(t_src, dtype=float)
+    y_src = np.asarray(y_src, dtype=float)
+    t_dst = np.asarray(t_dst, dtype=float)
+    out = np.full(np.shape(t_dst), np.nan, dtype=float)
+    good = np.isfinite(t_src) & (t_src > 0) & np.isfinite(y_src) & (y_src > 0)
+    if np.count_nonzero(good) < 2:
+        return out
+    order = np.argsort(t_src[good])
+    log_t = np.log10(t_src[good][order])
+    log_y = np.log10(y_src[good][order])
+    _, uniq = np.unique(log_t, return_index=True)
+    log_t, log_y = log_t[uniq], log_y[uniq]
+    if log_t.size < 2:
+        return out
+    dst_ok = np.isfinite(t_dst) & (t_dst > 0)
+    log_dst = np.log10(t_dst[dst_ok])
+    inside = (log_dst >= log_t[0]) & (log_dst <= log_t[-1])
+    if not np.any(inside):
+        return out
+    vals = np.full(log_dst.shape, np.nan, dtype=float)
+    vals[inside] = np.interp(log_dst[inside], log_t, log_y)
+    out[dst_ok] = 10.0**vals
+    return out
+
+
+def _vegas_los_shock_series(params, t_min, t_max):
+    """
+    Observer-frame forward-shock series along the theta column nearest ``thv``.
+
+    ``nu_a``, ``nu_m``, and ``nu_c`` are comoving in VEGAS. They are boosted with
+    ``Doppler / (1 + z)``, matching VegasAfterglow's diagnostic plots.
+    """
+    vegas_model = _build_vegas_model(params)
+    det = vegas_model.details(t_min=float(t_min), t_max=float(t_max))
+    theta = np.asarray(det.theta, dtype=float)
+    j = int(np.argmin(np.abs(theta - float(params["thv"]))))
+    fwd = det.fwd
+    t_obs = np.asarray(fwd.t_obs, dtype=float)[0, j, :]
+    boost = np.asarray(fwd.Doppler, dtype=float)[0, j, :] / (1.0 + float(params["z"]))
+    series = {"t_obs": t_obs, "theta": float(theta[j])}
+    for key in ("nu_a", "nu_m", "nu_c"):
+        comoving = np.asarray(getattr(fwd, key), dtype=float)[0, j, :]
+        series[key] = comoving * boost
+    return series
+
+
+def vegas_characteristics_at_epochs(params, epochs, spectrum_fnu):
+    """
+    Observer-frame nu_a, nu_m, nu_c, and F_nu,max at ``epochs``.
+
+    Frequencies are the line-of-sight forward shock. F_nu,max is the peak of
+    the jet-integrated synchrotron spectrum, in mJy. ``params`` must already
+    be expanded to physical keys.
+    """
+    epochs = np.asarray(epochs, dtype=float)
+    positive = epochs[np.isfinite(epochs) & (epochs > 0)]
+    if positive.size == 0:
+        raise ValueError("characteristic epochs must contain positive observer times")
+    series = _vegas_los_shock_series(
+        params, np.min(positive) / 3.0, np.max(positive) * 3.0
+    )
+    fnu = np.asarray(spectrum_fnu, dtype=float)
+    if fnu.shape[0] != epochs.size:
+        raise ValueError(
+            f"spectrum fnu has {fnu.shape[0]} epochs, expected {epochs.size}"
+        )
+    fnu_pos = np.where(np.isfinite(fnu) & (fnu > 0), fnu, np.nan)
+    return {
+        "times": epochs,
+        "theta": series["theta"],
+        "nu_a": _interp_loglog(series["t_obs"], series["nu_a"], epochs),
+        "nu_m": _interp_loglog(series["t_obs"], series["nu_m"], epochs),
+        "nu_c": _interp_loglog(series["t_obs"], series["nu_c"], epochs),
+        "fnu_max": np.nanmax(fnu_pos, axis=1),
+    }
+
+
 def _model_flux_or_nan(times, nu, params, what, library=None):
     try:
         flux = np.asarray(
@@ -537,7 +623,7 @@ def compute_plot_data(
     observed_data,
     xlim,
     spectrum_epochs=None,
-    spectrum_dt_sec=500.0,
+    spectrum_dt_frac=0.04,
     n_freq_bins_spectrum=100,
     n_freq_bins_breaks=160,
     n_break_times=60,
@@ -652,8 +738,13 @@ def compute_plot_data(
             jet, P, epochs, n_freq_bins_spectrum
         )
     epoch_observations = build_spectrum_epoch_observations(
-        df, epochs, dt_sec=spectrum_dt_sec
+        df, epochs, dt_frac=spectrum_dt_frac
     )
+    characteristics = None
+    if library == "vegas":
+        characteristics = vegas_characteristics_at_epochs(
+            physical, epochs, spectrum_fnu
+        )
 
     break_times = np.geomspace(1.0, 1.0e6, num=n_break_times)
     if str(physical["jetType"]).lower() == "tophat":
@@ -695,6 +786,7 @@ def compute_plot_data(
             "fnu": spectrum_fnu,
             "observations": epoch_observations,
         },
+        "characteristics": characteristics,
         "breaks": {
             "times": break_times,
             "nu_m": np.asarray(nu_m, dtype=float),
