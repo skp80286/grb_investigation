@@ -112,6 +112,7 @@ lc_plot_settings_default = {
         "Ks": 20000,
         "radio(15.5GHz)": 10000,
         "radio(15GHz)": 10000,
+        "radio(1.3GHz)": 10000,
     },
     "band_colors": {
         "X-ray(10keV)": "darkviolet",

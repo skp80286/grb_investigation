@@ -109,6 +109,8 @@ priors_generic_wind = {
     "loglf": {"low": 1.0, "high": 4.0},  # Γ₀ ~ 10–10,000
     # Wind-like medium parameter
     "logA": {"low": -10.0, "high": 10.0},  # Wind medium strongly motivated
+    # Wind density slope, n ∝ r^{-k_m}
+    "k_m": {"low": 1.0, "high": 3.0},
 }
 
 priors_generic_ism_plus_wind = {
@@ -132,6 +134,8 @@ priors_generic_ism_plus_wind = {
     "loglf": {"low": 1.0, "high": 4.0},  # Γ₀ ~ 10–10,000
     # Wind-like medium parameter
     "logA": {"low": -10.0, "high": 10.0},  # Wind medium strongly motivated
+    # Wind density slope, n ∝ r^{-k_m}
+    "k_m": {"low": 1.0, "high": 3.0},
 }
 
 priors_onax = {
@@ -171,6 +175,7 @@ priors_tophat = {
     "s": {"low": 0.0, "high": 0.0},
     "loglf": {"low": 2.0, "high": 4.0},
     "logA": {"low": -10.0, "high": 10.0},
+    "k_m": {"low": 1.0, "high": 3.0},
 }
 
 # short GRB
@@ -185,6 +190,7 @@ priors_sgrb = {
     "s": {"low": 1.0, "high": 6.0},
     "loglf": {"low": 2.0, "high": 4.0},  # High Γ₀; clean fireball
     "logA": {"low": -10.0, "high": 10.0},  # ISM favoured; low wind
+    "k_m": {"low": 1.0, "high": 3.0},
 }
 
 # Ultra-long GRB
@@ -199,6 +205,7 @@ priors_ulgrb = {
     "s": {"low": 1.0, "high": 5.0},
     "loglf": {"low": 1.5, "high": 2.5},  # Moderate Γ₀; not ultra-clean
     "logA": {"low": -10.0, "high": 10.0},  # Wind medium strongly motivated
+    "k_m": {"low": 1.0, "high": 3.0},
 }
 
 priors_collapsar = {
@@ -212,6 +219,7 @@ priors_collapsar = {
     "s": {"low": 1.0, "high": 6.0},
     "loglf": {"low": 2.0, "high": 2.8},
     "logA": {"low": 0.0, "high": 2.0},  # KEY: strong wind A* ~ 1–100
+    "k_m": {"low": 1.0, "high": 3.0},
 }
 
 # Low-luminosity GRB (LLGRB)
@@ -226,6 +234,7 @@ priors_llgrb = {
     "s": {"low": 1.0, "high": 4.0},
     "loglf": {"low": 0.5, "high": 1.5},  # KEY: Γ₀ ~ 3–30; mildly relativistic
     "logA": {"low": -10.0, "high": 10.0},
+    "k_m": {"low": 1.0, "high": 3.0},
 }
 
 # classical tophat long GRB
@@ -495,6 +504,7 @@ priors_GRB260924A_wind = {
     "loglf": {"low": 2, "high": 2.0},  # Γ₀ ~ 10–10,000
     # Wind-like medium parameter
     "logA": {"low": -3.0, "high": 0.5},  # Wind medium strongly motivated
+    "k_m": {"low": 1.0, "high": 3.0},
 }
 
 priors_GRB260924A_ism_plus_wind = {
@@ -518,6 +528,7 @@ priors_GRB260924A_ism_plus_wind = {
     "loglf": {"low": 1.0, "high": 4.0},  # Γ₀ ~ 10–10,000
     # Wind-like medium parameter
     "logA": {"low": -3.0, "high": 1.0},  # Wind medium strongly motivated
+    "k_m": {"low": 1.0, "high": 3.0},
 }
 
 priors_ism_fixlf = {
@@ -564,29 +575,32 @@ priors_ism_plus_wind_fixlf = {
     "loglf": {"low": 2.0, "high": 2.0},  # Γ₀ ~ 100
     # Wind-like medium parameter
     "logA": {"low": -10.0, "high": 10.0},  # Wind medium strongly motivated
+    "k_m": {"low": 1.0, "high": 3.0},
 }
 
 priors_wind_fixlf = {
     # Isotropic equivalent energy [erg] — wide range to accommodate various energies
-    "loge0": {"low": 49, "high": 56},
+    "loge0": {"low": 49, "high": 58},
     # Magnetic field equipartition fraction
     "logepsb": {"low": -6, "high": -1},
     # Electron equipartition fraction
-    "logepse": {"low": -1, "high": -1},
-    # ISM number density [cm^-3]
+    "logepse": {"low": -2.5, "high": -0.3},
+    # ISM number density [cm^-3]. Set to 0 for pure wind.
     "n0": {"low": 0.0, "high": 0.0},
     # Half-opening angle of jet core [rad]
-    "logthc": {"low": -2.5, "high": -0.2},  # ~0.003–0.6 rad
+    "logthc": {"low": -1.76, "high": -0.2},  # ~0.003–0.6 rad
     # Viewing angle [rad]
-    "logthv": {"low": -5.0, "high": 0.497},  # ~..–3 rad
+    "logthv": {"low": -5.0, "high": 0.497},  # ~0.003–3 rad
     # Electron spectral index
     "p": {"low": 2.01, "high": 3.5},
     # Jet structure power-law index
     "s": {"low": 1, "high": 8},
     # log initial Lorentz factor
-    "loglf": {"low": 2.0, "high": 2.0},  # Γ₀ ~ 100
+    "loglf": {"low": 3.0, "high": 3.0},  # Γ₀ ~ 1000
     # Wind-like medium parameter
     "logA": {"low": -10.0, "high": 10.0},  # Wind medium strongly motivated
+    # Wind density slope, n ∝ r^{-k_m}
+    "k_m": {"low": 1.0, "high": 3.0},
 }
 
 # Map of available priors sets

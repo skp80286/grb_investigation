@@ -193,16 +193,20 @@ def _jetsimpy_jet_and_P(params):
     return jet, P
 
 
-def _vegas_medium(n0, nwind):
-    """Map jetsimpy ``nism`` + ``nwind`` onto a VegasAfterglow medium."""
+def _vegas_medium(n0, nwind, k_m=2.0):
+    """Map jetsimpy ``nism`` + ``nwind`` onto a VegasAfterglow medium.
+
+    ``k_m`` is the wind density slope (``n ∝ r^{-k_m}``). It is unused for a
+    pure ISM (``nwind == 0``). Missing values keep the standard wind, ``k_m=2``.
+    """
     from VegasAfterglow import ISM, Wind
 
     if nwind == 0:
         return ISM(n0)
     A_star = nwind  # * _VEGAS_A_STAR_PER_NWIND
     if n0 == 0:
-        return Wind(A_star, k_m=2.0)
-    return Wind(A_star, n_ism=n0, k_m=2.0)
+        return Wind(A_star, k_m=k_m)
+    return Wind(A_star, n_ism=n0, k_m=k_m)
 
 
 def _vegas_jet(params):
@@ -232,7 +236,7 @@ def _build_vegas_model(params):
     dl_cm = cosmo.luminosity_distance(params["z"]).to("cm").value
     return Model(
         jet=_vegas_jet(params),
-        medium=_vegas_medium(params["n0"], params["A"]),
+        medium=_vegas_medium(params["n0"], params["A"], params.get("k_m", 2.0)),
         observer=Observer(lumi_dist=dl_cm, z=params["z"], theta_obs=params["thv"]),
         fwd_rad=Radiation(eps_e=params["epse"], eps_B=params["epsb"], p=params["p"]),
     )

@@ -496,6 +496,7 @@ param_names_math = {
     "loglf": r"$\log_{10}(\Gamma_0)$",
     "logA": r"$\log_{10}(A)$",
     "k": r"$k$",
+    "k_m": r"$k_m$",
 }
 param_names_display = [param_names_math[p] for p in param_names]
 # param_names_greeks = [r"$\log_{10}(E_{K,iso})", r"$\log_{10}(\epsilon_{B})$",  r"$\log_{10}(\epsilon_{e})$", r"$\log_{10}(n0)$", r"$\theta_{c}$", r"$\theta_{v}$", r"$\Gamma_0$"]
