@@ -251,6 +251,19 @@ priors_230812B = {
     "logA": {"low": 0, "high": 0},
 }
 
+priors_230812B_wind = {
+    "loge0": {"low": 51, "high": 55},
+    "logepsb": {"low": -5, "high": -1},
+    "logepse": {"low": -1.5, "high": -0.5},
+    "logn0": {"low": -3.0, "high": 1.0},
+    "logthc": {"low": -1.5, "high": -0.2},  #
+    "logthv": {"low": -3.0, "high": -0.2},  # On-axis: thv << thc
+    "p": {"low": 2.6, "high": 2.6},  # Fixed
+    "s": {"low": 0.0, "high": 0.0},
+    "loglf": {"low": 1, "high": 4},
+    "logA": {"low": -2, "high": 0.5},
+    "k_m": {"low": 2.0, "high": 2.0},
+}
 #
 priors_250916A = {
     "loge0": {"low": 53, "high": 55},
@@ -615,6 +628,7 @@ priors_map = {
     "structured_offaxis": priors_structured_offaxis,
     "tophat": priors_tophat,
     "230812B": priors_230812B,
+    "230812B_wind": priors_230812B_wind,
     "250916A": priors_250916A,
     "250916A_Gamma": priors_250916A_Gamma,
     "250916A_onax": priors_250916A_onax,
