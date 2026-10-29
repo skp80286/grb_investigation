@@ -151,51 +151,60 @@ def build_obs_weights(filt_values, band_targets=None):
     return obs_weights_local
 
 
+# Quoted upper limits whose FluxErrs are below this fraction of the limit
+# are placeholders (zero, or a failed magnitude conversion), not uncertainties.
+UL_MIN_FRACTIONAL_ERROR = 1e-4
+LLH_PENALTY = -1e100
+
+
 def log_likelihood(cube, ndim, nparams):
-    # in log space
+    """Log-normal detections and censored linear-flux upper limits.
+
+    Detections, with σ_ln = σ_F / F:
+
+        ln L = -1/2 ln(2π σ_ln²) - 1/2 [ln(F / F_model) / σ_ln]²
+
+    Upper limits, with σ_F the flux error (or F_lim/3 when that error is
+    unusable):
+
+        ln L = ln Φ((F_lim - F_model) / σ_F)
+
+    Band weights multiply the whole per-point term, normalization included.
+    """
     params = {name: cube[i] for i, name in enumerate(param_names)}
     for name in priors_uniform.keys():
         if priors_uniform[name]["low"] == priors_uniform[name]["high"]:
             params[name] = priors_uniform[name]["low"]
     params["jetType"] = args.jetType
     params["z"] = args.redshift
-    # print("params:", params)
     try:
         model_flux = model(obs_time, obs_nu, params_for_jetsimpy_model(params))
-        # print("model_flux:", model_flux)
     except Exception as e:
         logger.warning("log_likelihood: model failed (%s); returning penalty llh", e)
-        return -1e100
+        return LLH_PENALTY
 
-    # Residuals and chi2 term
-    residual = 1 - (model_flux / obs_flux)
+    model_flux = np.asarray(model_flux, dtype=float).reshape(-1)
+    if (
+        model_flux.size != obs_flux.size
+        or not np.all(np.isfinite(model_flux))
+        or np.any(model_flux <= 0.0)
+    ):
+        return LLH_PENALTY
+
+    lnl = np.empty(obs_flux.shape, dtype=float)
+    det = ~obs_ul
+    if np.any(det):
+        log_pull = np.log(obs_flux[det] / model_flux[det]) / sigma_ln[det]
+        lnl[det] = det_lognorm[det] - 0.5 * log_pull**2
     if np.any(obs_ul):
-        # For upper limits: very high residual if model exceeds limit, else zero
-        residual[obs_ul] = np.where(
-            model_flux[obs_ul] > obs_flux[obs_ul],
-            1e10,  # Infinite penalty if model exceeds the upper limit
-            0.0,  # Zero penalty if model respects the limit
+        lnl[obs_ul] = stats.norm.logcdf(
+            (obs_flux[obs_ul] - model_flux[obs_ul]) / sigma_ul[obs_ul]
         )
 
-    try:
-        chi2_terms = 0.5 * (residual / err) ** 2
-    except RuntimeWarning as e:
-        print("Residual min/max:", np.nanmin(residual), np.nanmax(residual))
-        print("Err min/max:", np.nanmin(err), np.nanmax(err))
-        print("Ratio min/max:", np.nanmin(ratio), np.nanmax(ratio))
-        print("Any inf residual:", np.isinf(residual).any())
-        print("Any inf err:", np.isinf(err).any())
+    llh = float(np.sum(lnl * obs_weights))
+    if not np.isfinite(llh):
+        return LLH_PENALTY
 
-        warnings.filterwarnings("error", category=RuntimeWarning)
-        print(f"Fatal RuntimeWarning: {e}")
-        sys.exit(1)
-
-    if args.use_band_weights or args.equal_band_weights:
-        chi2_terms *= obs_weights
-    chi2 = np.sum(chi2_terms)
-    # logger.info(f"weighted residuals={residuals}")
-    # llh = -0.5 * np.sum(residuals**2)
-    llh = logdet - chi2
     global count
     count += 1
     if count % 1000 == 0:
@@ -203,9 +212,6 @@ def log_likelihood(cube, ndim, nparams):
     global maxllh
     if llh > maxllh:
         maxllh = llh
-        # params_str = ", ".join( f"{param}={cube[i]:.8f}" for i, param in enumerate(param_names))
-        # logger.info(f"Log-likelihood: {llh}, {params_str}, \nobs_flux={obs_flux}\n, model_flux={model_flux}")
-    # print("llh:", llh)
     return llh
 
 
@@ -576,10 +582,52 @@ if not args.post_process_only and not args.plot_only:
     else:
         obs_ul = np.zeros(len(obs_flux), dtype=bool)
 
-    # Log-determinant term
-    err = np.where(obs_flux > 0, obs_flux_err / obs_flux, np.inf)
-    err = np.where(err <= 0, np.finfo(float).tiny, err)
-    logdet = np.sum(np.log(2.0 * np.pi * err**2))
+    det = ~obs_ul
+    bad_det = det & (~np.isfinite(obs_flux_err) | (obs_flux_err <= 0))
+    if np.any(bad_det):
+        n_bad = int(bad_det.sum())
+        logger.error(
+            "%d detections have non-positive or non-finite FluxErrs", n_bad
+        )
+        raise ValueError(
+            f"{n_bad} detections have non-positive or non-finite FluxErrs"
+        )
+
+    # σ on ln(flux). Fixed by the data, so the normalization is constant.
+    sigma_ln = np.full(len(obs_flux), np.nan, dtype=float)
+    det_lognorm = np.zeros(len(obs_flux), dtype=float)
+    sigma_ln[det] = obs_flux_err[det] / obs_flux[det]
+    det_lognorm[det] = -0.5 * np.log(2.0 * np.pi * sigma_ln[det] ** 2)
+    logger.info(
+        "Detections enter as a Gaussian in ln(flux), sigma = FluxErrs/Fluxes, "
+        "n_det=%d.",
+        int(det.sum()),
+    )
+
+    # Linear-flux uncertainty for the censored upper-limit term.
+    sigma_ul = np.full(len(obs_flux), np.nan, dtype=float)
+    if np.any(obs_ul):
+        sigma_ul[obs_ul] = obs_flux_err[obs_ul]
+        missing_ul = obs_ul & (
+            ~np.isfinite(sigma_ul)
+            | (sigma_ul <= 0)
+            | (sigma_ul < UL_MIN_FRACTIONAL_ERROR * obs_flux)
+        )
+        n_missing_ul = int(missing_ul.sum())
+        if n_missing_ul:
+            sigma_ul[missing_ul] = obs_flux[missing_ul] / 3.0
+            logger.info(
+                "Treating %d upper limits with missing or unusable FluxErrs "
+                "as 3-sigma limits (sigma = flux/3). Fractional errors below "
+                "%.0e are unusable.",
+                n_missing_ul,
+                UL_MIN_FRACTIONAL_ERROR,
+            )
+        logger.info(
+            "Upper limits enter as ln Φ((F_lim - F_model) / sigma), "
+            "n_ul=%d.",
+            int(obs_ul.sum()),
+        )
 
     obs_weights = np.ones(len(obs_flux), dtype=float)
     if args.use_band_weights and args.equal_band_weights:
