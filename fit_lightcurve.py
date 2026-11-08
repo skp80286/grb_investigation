@@ -40,9 +40,19 @@ Example:
     python fit_lightcurve.py data/GRB260924A.csv --model broken --common \
         --spectrum
         -> also writes the model spectrum at six log-spaced times from 1e3 s to 1e6 s
+
+    python fit_lightcurve.py data/GRB260924A.csv --model broken \
+        --start-time 1e3 --end-time 1e6
+        -> only observations with 1e3 s < t < 1e6 s are used
+
+    The per-band figure is also accompanied by one plot of every fitted
+    band together. Colors and flux multipliers come from
+    lc_plot_settings_default. Each segment is labeled with alpha, and
+    each band is also labeled with its reduced chi-squared.
 """
 
 import argparse
+import random
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +61,8 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 from scipy.optimize import least_squares
+
+from lc_plot_settings import lc_plot_settings_default
 
 
 # ============================================================
@@ -149,9 +161,7 @@ def expand_params(params, model, logtb_fixed=None):
     if model == "double":
         logtb1, logtb2 = np.sort([logtb_fixed, params[4]])
 
-        return np.array(
-            [params[0], params[1], params[2], params[3], logtb1, logtb2]
-        )
+        return np.array([params[0], params[1], params[2], params[3], logtb1, logtb2])
 
     raise ValueError(f"A fixed break is not used with model: {model}")
 
@@ -645,13 +655,9 @@ def fit_band(df_band, model, break_epoch=None):
 
         errors_free = np.sqrt(np.diag(covariance))
 
-        errors = _embed_free_errors(
-            errors_free, model, best_params, logtb_fixed
-        )
+        errors = _embed_free_errors(errors_free, model, best_params, logtb_fixed)
 
-        covariance = _embed_free_covariance(
-            covariance, model, best_params, logtb_fixed
-        )
+        covariance = _embed_free_covariance(covariance, model, best_params, logtb_fixed)
 
     except np.linalg.LinAlgError:
         errors = np.full(len(best_params), np.nan)
@@ -901,9 +907,9 @@ def fit_common(data, fit_bands, plot_bands, model, break_epoch=None):
 
     _, richest = max(prepared, key=lambda item: item[1]["n"])
 
-    shape_free0 = initial_guess(
-        richest["logt"], richest["logf"], model, logtb_fixed
-    )[1:]
+    shape_free0 = initial_guess(richest["logt"], richest["logf"], model, logtb_fixed)[
+        1:
+    ]
 
     shape0 = expand_shape(shape_free0, model, logtb_fixed)
 
@@ -917,9 +923,7 @@ def fit_common(data, fit_bands, plot_bands, model, break_epoch=None):
     logt_all = np.concatenate([obs["logt"] for _, obs in prepared])
     logf_all = np.concatenate([obs["logf"] for _, obs in prepared])
 
-    lower_shape, upper_shape = parameter_bounds(
-        logt_all, logf_all, model, logtb_fixed
-    )
+    lower_shape, upper_shape = parameter_bounds(logt_all, logf_all, model, logtb_fixed)
 
     lower_logF = []
     upper_logF = []
@@ -1059,9 +1063,7 @@ def fit_common(data, fit_bands, plot_bands, model, break_epoch=None):
 
             continue
 
-        fits[band] = fit_normalization(
-            obs, shape, model, break_epoch, logtb_fixed
-        )
+        fits[band] = fit_normalization(obs, shape, model, break_epoch, logtb_fixed)
 
         print(f"  {band}: normalization only (not used in the fit)")
 
@@ -1146,9 +1148,7 @@ def print_common_result(fits, fit_bands):
     """Shared temporal parameters, then one normalization per band."""
 
     fitted = [
-        band
-        for band in fit_bands
-        if band in fits and not fits[band].get("norm_only")
+        band for band in fit_bands if band in fits and not fits[band].get("norm_only")
     ]
 
     if not fitted:
@@ -1219,7 +1219,9 @@ def print_common_result(fits, fit_bands):
         )
 
     norm_only = [
-        band for band, fit in fits.items() if fit.get("norm_only") and band not in fitted
+        band
+        for band, fit in fits.items()
+        if fit.get("norm_only") and band not in fitted
     ]
 
     if norm_only:
@@ -1275,11 +1277,26 @@ def powerlaw_sections(tmin, tmax, params, model):
     return sections
 
 
-def label_powerlaw_slopes(ax, tmin, tmax, params, model, color, flux_range=None):
-    """Write the fitted temporal index at the middle of each segment."""
+def label_powerlaw_slopes(
+    ax,
+    tmin,
+    tmax,
+    params,
+    model,
+    color,
+    flux_range=None,
+    scale=1.0,
+    reduced_chi2=None,
+):
+    """Write the fitted temporal index at the middle of each segment.
+
+    When reduced_chi2 is given, it is written once, on the first
+    segment that receives a label.
+    """
 
     sections = powerlaw_sections(tmin, tmax, params, model)
     span = np.log10(tmax) - np.log10(tmin)
+    chi2_pending = reduced_chi2 is not None and np.isfinite(reduced_chi2)
 
     for t_left, t_right, alpha in sections:
         segment = np.log10(t_right) - np.log10(t_left)
@@ -1291,12 +1308,12 @@ def label_powerlaw_slopes(ax, tmin, tmax, params, model, color, flux_range=None)
             continue
 
         t_mid = np.sqrt(t_left * t_right)
-        f_mid = 10 ** evaluate_model(np.log10([t_mid]), params, model)[0]
+        f_mid = scale * 10 ** evaluate_model(np.log10([t_mid]), params, model)[0]
 
         # Keep the label on the part of the curve that is inside the axes.
         if flux_range is not None and not (flux_range[0] < f_mid < flux_range[1]):
             samples = np.logspace(np.log10(t_left), np.log10(t_right), 40)
-            fluxes = 10 ** evaluate_model(np.log10(samples), params, model)
+            fluxes = scale * 10 ** evaluate_model(np.log10(samples), params, model)
             inside = (fluxes > flux_range[0]) & (fluxes < flux_range[1])
 
             if not np.any(inside):
@@ -1306,8 +1323,14 @@ def label_powerlaw_slopes(ax, tmin, tmax, params, model, color, flux_range=None)
             t_mid = samples[inside][nearest]
             f_mid = fluxes[inside][nearest]
 
+        text = rf"$\alpha={alpha:.2f}$"
+
+        if chi2_pending:
+            text += "\n" + rf"$\chi^2_\nu={reduced_chi2:.2f}$"
+            chi2_pending = False
+
         ax.annotate(
-            rf"$\alpha={alpha:.2f}$",
+            text,
             xy=(t_mid, f_mid),
             xytext=(0, 6),
             textcoords="offset points",
@@ -1347,12 +1370,31 @@ def _is_upper_limit(series):
     return series.astype(str).str.upper().isin(["Y", "YES", "TRUE", "1"])
 
 
+def _band_multiplier(band):
+    """Flux multiplier from lc_plot_settings_default. Unmapped bands use 1."""
+
+    return float(lc_plot_settings_default["multipliers"].get(band, 1.0))
+
+
 def _band_colors(bands):
-    """Distinct color for each filter, stable for a given band list."""
+    """
+    Color for each filter from lc_plot_settings_default.
 
-    cmap = plt.get_cmap("tab20")
+    A band with no entry gets a color that stays the same for that name.
+    """
 
-    return {band: cmap(i % cmap.N) for i, band in enumerate(bands)}
+    defined = lc_plot_settings_default["band_colors"]
+    colors = {}
+
+    for band in bands:
+        if band in defined:
+            colors[band] = defined[band]
+
+        else:
+            rng = random.Random(str(band))
+            colors[band] = "#{:06x}".format(rng.randint(0, 0xFFFFFF))
+
+    return colors
 
 
 def plot_common_results(data, fits, model, bands, output=None):
@@ -1811,6 +1853,224 @@ def plot_results(data, fits, model, bands, output=None):
         plt.show()
 
 
+def _model_breaks(params, model):
+    """Observer-frame break times (seconds) for a fitted model."""
+
+    if model == "broken":
+        return [10 ** params[3]]
+
+    if model == "double":
+        return [10 ** params[4], 10 ** params[5]]
+
+    return []
+
+
+def plot_all_fitted_bands(data, fits, model, bands, output=None):
+    """
+    Every band on one light curve.
+
+    Fluxes are multiplied by the lc_plot_settings_default factor for
+    that band. Detections, upper limits, and the fitted model share the
+    axes. Each fitted segment is labeled with its temporal index, and
+    each band is labeled with its reduced chi-squared.
+    """
+
+    plotted = data[data["Filt"].astype(str).isin(bands)]
+    times = plotted.loc[plotted["Times"] > 0, "Times"]
+
+    if len(times) == 0:
+        print("\nNo positive fluxes to draw on the combined light curve.")
+        return
+
+    t_lo = float(times.min())
+    t_hi = float(times.max())
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    colors = _band_colors(bands)
+    legend_handles = []
+    slope_labels = []
+    scaled_fluxes = []
+
+    for band in bands:
+        color = colors[band]
+        multiplier = _band_multiplier(band)
+        df_band = data[data["Filt"].astype(str) == band]
+        fit = fits.get(band)
+
+        detections = df_band[
+            ~_is_upper_limit(df_band["UL"])
+            & (df_band["Times"] > 0)
+            & (df_band["Fluxes"] > 0)
+        ]
+
+        upper = df_band[
+            _is_upper_limit(df_band["UL"])
+            & (df_band["Times"] > 0)
+            & (df_band["Fluxes"] > 0)
+        ]
+
+        if len(detections) > 0:
+            scaled_fluxes.append(detections["Fluxes"].to_numpy(dtype=float) * multiplier)
+
+            ax.errorbar(
+                detections["Times"],
+                detections["Fluxes"] * multiplier,
+                yerr=detections["FluxErrs"] * multiplier,
+                fmt="o",
+                color=color,
+                ecolor=color,
+                mec="black",
+                capsize=2,
+                markersize=5,
+                elinewidth=0.6,
+                linestyle="none",
+                zorder=3,
+            )
+
+        if len(upper) > 0:
+            scaled_fluxes.append(upper["Fluxes"].to_numpy(dtype=float) * multiplier)
+
+            ax.errorbar(
+                upper["Times"],
+                upper["Fluxes"] * multiplier,
+                yerr=0.15 * upper["Fluxes"] * multiplier,
+                uplims=True,
+                fmt="v",
+                color=color,
+                ecolor=color,
+                mec="black",
+                markersize=6,
+                linestyle="none",
+                zorder=3,
+            )
+
+        drew_model = False
+
+        if fit is not None:
+            band_times = df_band.loc[df_band["Times"] > 0, "Times"]
+
+            if len(band_times) > 0:
+                tmin = float(band_times.min())
+                tmax = float(band_times.max())
+
+                if np.isclose(tmin, tmax):
+                    tmodel = np.array([tmin])
+
+                else:
+                    tmodel = np.logspace(np.log10(tmin), np.log10(tmax), 500)
+
+                fmodel = multiplier * 10 ** evaluate_model(
+                    np.log10(tmodel), fit["params"], model
+                )
+
+                ax.plot(
+                    tmodel,
+                    fmodel,
+                    linestyle="-",
+                    color=color,
+                    linewidth=1.8,
+                    zorder=2,
+                )
+
+                drew_model = True
+                slope_labels.append(
+                    (
+                        tmin,
+                        tmax,
+                        fit["params"],
+                        color,
+                        multiplier,
+                        fit["reduced_chi2"],
+                    )
+                )
+
+                for tb in _model_breaks(fit["params"], model):
+                    if t_lo <= tb <= t_hi:
+                        ax.axvline(
+                            tb,
+                            color=color,
+                            linestyle=":",
+                            linewidth=1.0,
+                            alpha=0.7,
+                            zorder=1,
+                        )
+
+        if len(detections) == 0 and len(upper) == 0 and not drew_model:
+            continue
+
+        legend_handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=color,
+                marker="v" if len(detections) == 0 and len(upper) > 0 else "o",
+                linestyle="-" if drew_model else "none",
+                markeredgecolor="black",
+                markersize=5,
+                label=f"{band} x {multiplier:g}",
+            )
+        )
+
+    if not scaled_fluxes:
+        plt.close(fig)
+        print("\nNo positive fluxes to draw on the combined light curve.")
+        return
+
+    scaled = np.concatenate(scaled_fluxes)
+    f_lo = float(np.min(scaled))
+    f_hi = float(np.max(scaled))
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(t_lo, t_hi)
+
+    if np.isclose(f_lo, f_hi):
+        ax.set_ylim(f_lo / 3.0, f_hi * 3.0)
+
+    else:
+        pad = 0.12 * (np.log10(f_hi) - np.log10(f_lo))
+
+        ax.set_ylim(
+            10 ** (np.log10(f_lo) - pad),
+            10 ** (np.log10(f_hi) + pad),
+        )
+
+    for tmin, tmax, params, color, scale, reduced_chi2 in slope_labels:
+        label_powerlaw_slopes(
+            ax,
+            tmin,
+            tmax,
+            params,
+            model,
+            color,
+            flux_range=ax.get_ylim(),
+            scale=scale,
+            reduced_chi2=reduced_chi2,
+        )
+
+    ax.set_xlabel("Time since trigger (s)")
+    ax.set_ylabel("Flux density (mJy)")
+    ax.grid(True, which="both", alpha=0.3)
+    ax.legend(
+        handles=legend_handles,
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
+        borderaxespad=0,
+        fontsize=8,
+        frameon=True,
+    )
+
+    if output:
+        plt.savefig(output, dpi=300, bbox_inches="tight", format="pdf")
+
+        print(f"\nSaved combined figure to: {output}")
+
+    else:
+        plt.show()
+
+    plt.close(fig)
+
+
 # ============================================================
 # Spectrum from the light-curve fit
 # ============================================================
@@ -1832,17 +2092,65 @@ def band_frequency(data, band):
     return float(np.median(nu))
 
 
+def _measured_at_epochs(data, band, nu, epochs):
+    """
+    Detections of a band that was not fit, snapped to the nearest epoch.
+
+    One row per epoch. Several detections on the same epoch are averaged
+    in log flux. Empty when the band has no positive detections.
+    """
+
+    df_band = data[data["Filt"].astype(str) == band]
+
+    detections = df_band[
+        ~_is_upper_limit(df_band["UL"])
+        & (df_band["Times"] > 0)
+        & (df_band["Fluxes"] > 0)
+    ]
+
+    if len(detections) == 0:
+        return []
+
+    epochs = np.asarray(epochs, dtype=float)
+    log_epochs = np.log10(epochs)
+    grouped = {}
+
+    for row in detections.itertuples(index=False):
+        epoch = float(epochs[int(np.argmin(np.abs(log_epochs - np.log10(row.Times))))])
+
+        grouped.setdefault(epoch, []).append(float(row.Fluxes))
+
+    rows = []
+
+    for epoch in sorted(grouped):
+        flux = float(np.exp(np.mean(np.log(grouped[epoch]))))
+
+        rows.append(
+            {
+                "epoch_s": epoch,
+                "band": band,
+                "frequency_Hz": nu,
+                "flux_mJy": flux,
+                "extrapolated": False,
+                "measured": True,
+            }
+        )
+
+    return rows
+
+
 def spectrum_from_fit(data, fits, epochs=None):
     """
-    Model flux density at each fitted band, at fixed observer times.
+    Flux density at each band, at fixed observer times.
 
-    The spectrum runs from the lowest to the highest frequency among
-    bands that have both a frequency and a light-curve fit. Epochs
-    outside the time span of the fitted detections are still evaluated;
-    those rows are marked extrapolated.
+    Fitted bands are evaluated from the light-curve model. A band that
+    has a frequency but too few detections for that fit is still
+    included: each detection is placed on the nearest epoch and marked
+    measured. Epochs outside the time span of the fitted detections are
+    marked extrapolated.
 
     Returns a table with epoch_s, band, frequency_Hz, flux_mJy,
-    extrapolated. None when nothing can be evaluated.
+    extrapolated, measured. None when nothing can be evaluated.
     """
 
     if epochs is None:
@@ -1865,31 +2173,59 @@ def spectrum_from_fit(data, fits, epochs=None):
 
         usable.append((band, nu, fit))
 
-    if not usable:
-        return None
-
-    t_fit = np.concatenate([fit["t"] for _, _, fit in usable])
-    t_lo = float(t_fit.min())
-    t_hi = float(t_fit.max())
-
     rows = []
 
-    for epoch in epochs:
-        extrapolated = bool(epoch < t_lo or epoch > t_hi)
-        logt = np.log10(epoch)
+    if usable:
+        t_fit = np.concatenate([fit["t"] for _, _, fit in usable])
+        t_lo = float(t_fit.min())
+        t_hi = float(t_fit.max())
 
-        for band, nu, fit in usable:
-            logf = evaluate_model(np.array([logt]), fit["params"], fit["model"])[0]
+        for epoch in epochs:
+            extrapolated = bool(epoch < t_lo or epoch > t_hi)
+            logt = np.log10(epoch)
 
-            rows.append(
-                {
-                    "epoch_s": float(epoch),
-                    "band": band,
-                    "frequency_Hz": nu,
-                    "flux_mJy": float(10 ** logf),
-                    "extrapolated": extrapolated,
-                }
-            )
+            for band, nu, fit in usable:
+                logf = evaluate_model(np.array([logt]), fit["params"], fit["model"])[0]
+
+                rows.append(
+                    {
+                        "epoch_s": float(epoch),
+                        "band": band,
+                        "frequency_Hz": nu,
+                        "flux_mJy": float(10**logf),
+                        "extrapolated": extrapolated,
+                        "measured": False,
+                    }
+                )
+
+    fitted_bands = {band for band, _, _ in usable}
+
+    for band, fit in fits.items():
+        if band in fitted_bands or fit:
+            continue
+
+        nu = band_frequency(data, band)
+
+        if nu is None:
+            print(f"  {band}: no frequency, left out of the spectrum")
+
+            continue
+
+        measured = _measured_at_epochs(data, band, nu, epochs)
+
+        if not measured:
+            print(f"  {band}: no detections, left out of the spectrum")
+
+            continue
+
+        placed = ", ".join(f"{row['epoch_s']:.3g} s" for row in measured)
+
+        print(f"  {band}: measured flux placed at {placed}")
+
+        rows.extend(measured)
+
+    if not rows:
+        return None
 
     spectrum = pd.DataFrame(rows)
 
@@ -1898,6 +2234,36 @@ def spectrum_from_fit(data, fits, epochs=None):
     )
 
     return spectrum.reset_index(drop=True)
+
+
+def fit_spectrum_powerlaw(frequency, flux):
+    """
+    Single power law F_ν ∝ ν^{-β}.
+
+    Returns (beta, log10 of the flux at 1 Hz). None when fewer than
+    two distinct frequencies are available.
+    """
+
+    frequency = np.asarray(frequency, dtype=float)
+    flux = np.asarray(flux, dtype=float)
+
+    good = np.isfinite(frequency) & np.isfinite(flux) & (frequency > 0) & (flux > 0)
+
+    frequency = frequency[good]
+    flux = flux[good]
+
+    if len(frequency) < 2:
+        return None
+
+    log_nu = np.log10(frequency)
+
+    if np.ptp(log_nu) <= 0:
+        return None
+
+    # log10 F = log10 F(1 Hz) - β log10 ν
+    slope, log_f_1hz = np.polyfit(log_nu, np.log10(flux), 1)
+
+    return -float(slope), float(log_f_1hz)
 
 
 def _spectrum_curve(frequency, flux):
@@ -1945,36 +2311,132 @@ def spectrum_table(spectrum):
 
 
 def plot_model_spectrum(spectrum, output=None):
-    """One plot: every epoch is a different color."""
+    """
+    One plot: every epoch is a different color.
+
+    Each epoch is fit with a single power law F_ν ∝ ν^{-β}, drawn
+    through the model points, and β is written on the curve.
+    """
 
     epochs = list(dict.fromkeys(spectrum["epoch_s"].tolist()))
     colors = [f"C{i % 10}" for i in range(len(epochs))]
 
     fig, ax = plt.subplots(figsize=(8, 5.5))
 
+    fitted_flux = []
+
     for epoch, color in zip(epochs, colors):
         piece = spectrum[np.isclose(spectrum["epoch_s"], epoch)]
         nu, flux = _spectrum_curve(piece["frequency_Hz"], piece["flux_mJy"])
 
-        extrapolated = bool(piece["extrapolated"].iloc[0])
+        model_piece = piece[~piece["measured"]]
+        measured_piece = piece[piece["measured"]]
+
+        extrapolated = (
+            bool(model_piece["extrapolated"].iloc[0]) if len(model_piece) else False
+        )
         label = f"{epoch:.3g} s"
 
         if extrapolated:
             label = label + " (extrap.)"
 
+        fit = fit_spectrum_powerlaw(nu, flux)
+        marker_label = label if fit is None else None
+
+        if len(model_piece):
+            nu_model, flux_model = _spectrum_curve(
+                model_piece["frequency_Hz"], model_piece["flux_mJy"]
+            )
+
+            ax.errorbar(
+                nu_model,
+                flux_model,
+                fmt="o",
+                color=color,
+                ecolor=color,
+                mec="black",
+                capsize=2,
+                markersize=5,
+                elinewidth=0.6,
+                linestyle="none",
+                label=marker_label,
+                zorder=3,
+            )
+
+            marker_label = None
+
+        if len(measured_piece):
+            nu_measured, flux_measured = _spectrum_curve(
+                measured_piece["frequency_Hz"], measured_piece["flux_mJy"]
+            )
+
+            ax.errorbar(
+                nu_measured,
+                flux_measured,
+                fmt="s",
+                color=color,
+                ecolor=color,
+                mec="black",
+                capsize=2,
+                markersize=5,
+                elinewidth=0.6,
+                linestyle="none",
+                label=marker_label,
+                zorder=4,
+            )
+
+        if fit is None:
+            continue
+
+        beta, log_f_1hz = fit
+
+        span = np.log10(nu.max()) - np.log10(nu.min())
+        pad = 0.03 * max(span, 0.3)
+
+        nu_line = np.logspace(
+            np.log10(nu.min()) - pad,
+            np.log10(nu.max()) + pad,
+            64,
+        )
+
+        flux_line = 10 ** (log_f_1hz - beta * np.log10(nu_line))
+
+        fitted_flux.append(flux_line)
+
         ax.plot(
-            nu,
-            flux,
-            "-o",
+            nu_line,
+            flux_line,
+            "-",
             color=color,
             linewidth=1.8,
-            markersize=5,
             label=label,
-            zorder=3,
+            zorder=2,
+        )
+
+        nu_mid = np.sqrt(nu.min() * nu.max())
+        f_mid = 10 ** (log_f_1hz - beta * np.log10(nu_mid))
+
+        ax.annotate(
+            rf"$\beta={beta:.2f}$",
+            xy=(nu_mid, f_mid),
+            xytext=(0, 6),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            color=color,
+            fontsize=11,
+            annotation_clip=False,
+            clip_on=False,
+            zorder=5,
         )
 
     nu_all = spectrum["frequency_Hz"].to_numpy()
-    flux_all = spectrum["flux_mJy"].to_numpy()
+
+    if fitted_flux:
+        flux_all = np.concatenate([spectrum["flux_mJy"].to_numpy(), *fitted_flux])
+
+    else:
+        flux_all = spectrum["flux_mJy"].to_numpy()
 
     log_nu = np.log10(nu_all)
     pad_nu = 0.04 * max(log_nu.max() - log_nu.min(), 0.3)
@@ -1991,7 +2453,24 @@ def plot_model_spectrum(spectrum, output=None):
     ax.set_xlabel(r"Frequency (Hz)")
     ax.set_ylabel(r"Flux density (mJy)")
     ax.grid(True, which="both", alpha=0.3)
-    ax.legend(loc="best", fontsize=9)
+
+    handles, labels = ax.get_legend_handles_labels()
+
+    if spectrum["measured"].any():
+        handles.append(
+            Line2D(
+                [],
+                [],
+                linestyle="none",
+                marker="s",
+                color="0.3",
+                markeredgecolor="black",
+                markersize=5,
+            )
+        )
+        labels.append("measured")
+
+    ax.legend(handles, labels, loc="best", fontsize=9)
 
     if output:
         plt.savefig(output, dpi=300, bbox_inches="tight", format="pdf")
@@ -2016,15 +2495,27 @@ def print_spectrum(spectrum):
     print("=" * 70)
 
     for epoch, piece in spectrum.groupby("epoch_s", sort=True):
-        note = " (extrapolated)" if bool(piece["extrapolated"].iloc[0]) else ""
+        model_rows = piece[~piece["measured"]]
+        note = ""
+
+        if len(model_rows) and bool(model_rows["extrapolated"].iloc[0]):
+            note = " (extrapolated)"
 
         print()
         print(f"{epoch:.6g} s{note}")
 
+        nu, flux = _spectrum_curve(piece["frequency_Hz"], piece["flux_mJy"])
+        fit = fit_spectrum_powerlaw(nu, flux)
+
+        if fit is not None:
+            print(f"  beta = {fit[0]:.3f}    F_nu ∝ nu^(-beta)")
+
         for row in piece.itertuples(index=False):
+            origin = "  (measured)" if row.measured else ""
+
             print(
                 f"  {row.band:<16s}  {row.frequency_Hz:.6g} Hz"
-                f"    {row.flux_mJy:.6g} mJy"
+                f"    {row.flux_mJy:.6g} mJy{origin}"
             )
 
 
@@ -2130,6 +2621,26 @@ def main():
         ),
     )
 
+    parser.add_argument(
+        "--start-time",
+        type=float,
+        default=None,
+        help=(
+            "Only use observations after this time (seconds since trigger). "
+            "The bound is exclusive."
+        ),
+    )
+
+    parser.add_argument(
+        "--end-time",
+        type=float,
+        default=None,
+        help=(
+            "Only use observations before this time (seconds since trigger). "
+            "The bound is exclusive."
+        ),
+    )
+
     args = parser.parse_args()
 
     if args.break_epoch is not None:
@@ -2138,6 +2649,19 @@ def main():
 
         if args.break_epoch <= 0:
             parser.error("--break-epoch must be positive (seconds since trigger)")
+
+    if args.start_time is not None and not np.isfinite(args.start_time):
+        parser.error("--start-time must be a finite number of seconds")
+
+    if args.end_time is not None and not np.isfinite(args.end_time):
+        parser.error("--end-time must be a finite number of seconds")
+
+    if (
+        args.start_time is not None
+        and args.end_time is not None
+        and args.start_time >= args.end_time
+    ):
+        parser.error("--start-time must be earlier than --end-time")
 
     # --------------------------------------------------------
     # Read data
@@ -2163,6 +2687,24 @@ def main():
     data["FluxErrs"] = pd.to_numeric(data["FluxErrs"], errors="coerce")
 
     data = data.dropna(subset=["Times", "Fluxes"])
+
+    n_loaded = len(data)
+
+    if args.start_time is not None:
+        data = data[data["Times"] > args.start_time]
+
+    if args.end_time is not None:
+        data = data[data["Times"] < args.end_time]
+
+    data = data.copy()
+
+    if (args.start_time is not None or args.end_time is not None) and data.empty:
+        window = []
+        if args.start_time is not None:
+            window.append(f"t > {args.start_time:.6g} s")
+        if args.end_time is not None:
+            window.append(f"t < {args.end_time:.6g} s")
+        raise ValueError("No observations with " + " and ".join(window))
 
     # --------------------------------------------------------
     # Determine bands
@@ -2213,6 +2755,11 @@ def main():
     if args.break_epoch is not None:
         print(f"Break : {args.break_epoch:.6g} s (fixed)")
 
+    if args.start_time is not None or args.end_time is not None:
+        start = f"{args.start_time:.6g} s" if args.start_time is not None else "-inf"
+        end = f"{args.end_time:.6g} s" if args.end_time is not None else "+inf"
+        print(f"Time  : {start} < t < {end} ({len(data)} of {n_loaded} rows)")
+
     if args.output is None:
         stem = Path(args.input).stem
         band_part = "_".join(fit_bands) if fit_bands else "none"
@@ -2234,14 +2781,9 @@ def main():
 
     if args.common:
         print()
-        print(
-            "Fitting a common "
-            f"{args.model} power law to: {', '.join(fit_bands)}"
-        )
+        print(f"Fitting a common {args.model} power law to: {', '.join(fit_bands)}")
 
-        fits = fit_common(
-            data, fit_bands, plot_bands, args.model, args.break_epoch
-        )
+        fits = fit_common(data, fit_bands, plot_bands, args.model, args.break_epoch)
 
         print_common_result(fits, fit_bands)
 
@@ -2268,6 +2810,10 @@ def main():
 
     elif plot_bands:
         plot_results(data, fits, args.model, plot_bands, output)
+
+        combined = str(Path(output).with_name(Path(output).stem + "_allbands.pdf"))
+
+        plot_all_fitted_bands(data, fits, args.model, plot_bands, combined)
 
     else:
         print("\nNo bands to plot; figure not written.")

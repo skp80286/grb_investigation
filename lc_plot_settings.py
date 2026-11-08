@@ -19,7 +19,7 @@ lc_plot_settings_grb230812B = {
         "radio(10GHz)": 100,
         "radio(6GHz)": 50,
         "radio(3GHz)": 25,
-        "radio(1.3GHz)": 10,
+        "radio(1.26GHz)": 10,
     },
     "filt_freqs": {
         "i": 3.98913e14,
@@ -32,7 +32,7 @@ lc_plot_settings_grb230812B = {
         "L": 5.55516e14,
         "u": 8.1178e14,
         "X-ray(10keV)": 2.41799e18,
-        "radio(1.3GHz)": 1.3e9,
+        "radio(1.26GHz)": 1.26e9,
         "radio(3GHz)": 3e9,
         "radio(6GHz)": 6e9,
         "radio(10GHz)": 1e10,
@@ -57,7 +57,7 @@ lc_plot_settings_grb230812B = {
         "VT_R": "orange",
         "R": "magenta",
         "J": "olive",
-        "radio(1.3GHz)": "darkgreen",
+        "radio(1.26GHz)": "darkgreen",
         "radio(3GHz)": "cornflowerblue",
         "radio(6GHz)": "peru",
         "radio(10GHz)": "#562778",
@@ -81,7 +81,7 @@ lc_plot_settings_grb230812B = {
         "VT_R": "peachpuff",
         "R": "plum",
         "J": "olive",
-        "radio(1.3GHz)": "mediumaquamarine",
+        "radio(1.26GHz)": "mediumaquamarine",
         "radio(3GHz)": "cornflowerblue",
         "radio(6GHz)": "peachpuff",
         "radio(10GHz)": "#5F3E77",
@@ -92,7 +92,7 @@ lc_plot_settings_grb230812B = {
     },
 }
 lc_plot_settings_default = {
-    "xlim": (1e2, 3e6),
+    "xlim": (1e2, 4e6),
     "ylim": (1e-9, 1e5),
     "multipliers": {
         "X-ray(10keV)": 50,

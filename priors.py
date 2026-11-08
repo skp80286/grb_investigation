@@ -112,6 +112,30 @@ priors_generic_wind = {
     # Wind density slope, n ∝ r^{-k_m}
     "k_m": {"low": 1.0, "high": 3.0},
 }
+priors_generic_wind_fixe = {
+    # Isotropic equivalent energy [erg] — wide range to accommodate various energies
+    "loge0": {"low": 49, "high": 58},
+    # Magnetic field equipartition fraction
+    "logepsb": {"low": -6, "high": -1},
+    # Electron equipartition fraction
+    "logepse": {"low": -1.0, "high": -1.0},
+    # ISM number density [cm^-3]. Set to 0 for pure wind.
+    "n0": {"low": 0.0, "high": 0.0},
+    # Half-opening angle of jet core [rad]
+    "logthc": {"low": -1.76, "high": -0.2},  # ~0.003–0.6 rad
+    # Viewing angle [rad]
+    "logthv": {"low": -5.0, "high": 0.497},  # ~0.003–3 rad
+    # Electron spectral index
+    "p": {"low": 2.01, "high": 3.5},
+    # Jet structure power-law index
+    "s": {"low": 1, "high": 8},
+    # log initial Lorentz factor
+    "loglf": {"low": 1.0, "high": 4.0},  # Γ₀ ~ 10–10,000
+    # Wind-like medium parameter
+    "logA": {"low": -10.0, "high": 10.0},  # Wind medium strongly motivated
+    # Wind density slope, n ∝ r^{-k_m}
+    "k_m": {"low": 1.0, "high": 3.0},
+}
 
 priors_generic_ism_plus_wind = {
     # Isotropic equivalent energy [erg] — wide range to accommodate various energies
@@ -245,24 +269,64 @@ priors_230812B = {
     "logn0": {"low": -4.0, "high": 1.0},
     "logthc": {"low": -1.5, "high": -0.2},  #
     "logthv": {"low": -3.0, "high": -0.2},  # On-axis: thv << thc
+    "p": {"low": 2.48, "high": 2.48},  # Fixed
+    "s": {"low": 0.0, "high": 0.0},
+    "loglf": {"low": 1, "high": 4},
+    "logA": {"low": 0, "high": 0},
+}
+
+priors_230812B_ism_spec = {
+    "loge0": {"low": 53.0, "high": 54.5},
+    "logepsb": {"low": -5, "high": -1},
+    "logepse": {"low": -2.0, "high": -0.5},
+    "logn0": {"low": -5.0, "high": 1.0},
+    "logthc": {"low": -1.5, "high": -0.4},  #
+    "logthv": {"low": -2.1, "high": -0.5},  # On-axis: thv << thc
     "p": {"low": 2.6, "high": 2.6},  # Fixed
     "s": {"low": 0.0, "high": 0.0},
     "loglf": {"low": 1, "high": 4},
     "logA": {"low": 0, "high": 0},
 }
 
-priors_230812B_wind = {
+priors_230812B_wind_spec = {
+    "loge0": {"low": 53.52, "high": 53.52},
+    "logepsb": {"low": -5, "high": -1},
+    "logepse": {"low": -1.0, "high": -1.0},
+    "n0": {"low": 0.0, "high": 0.0},
+    "logthc": {"low": -1.5, "high": -0.2},  #
+    "logthv": {"low": -3.0, "high": -0.2},  # On-axis: thv << thc
+    "p": {"low": 2.48, "high": 2.48},  # Fixed
+    "s": {"low": 0.0, "high": 0.0},
+    "loglf": {"low": 1, "high": 4},
+    "logA": {"low": -3, "high": 0.5},
+    "k_m": {"low": 0.5, "high": 2.0},
+}
+
+priors_230812B_wind_jetsimpy = {
     "loge0": {"low": 51, "high": 55},
     "logepsb": {"low": -5, "high": -1},
     "logepse": {"low": -1.5, "high": -0.5},
-    "logn0": {"low": -3.0, "high": 1.0},
+    "logn0": {"low": -4.0, "high": 1.0},
     "logthc": {"low": -1.5, "high": -0.2},  #
     "logthv": {"low": -3.0, "high": -0.2},  # On-axis: thv << thc
     "p": {"low": 2.6, "high": 2.6},  # Fixed
     "s": {"low": 0.0, "high": 0.0},
     "loglf": {"low": 1, "high": 4},
     "logA": {"low": -2, "high": 0.5},
-    "k_m": {"low": 2.0, "high": 2.0},
+}
+
+priors_230812B_wind_vegas = {
+    "loge0": {"low": 52, "high": 54},
+    "logepsb": {"low": -5, "high": -1},
+    "logepse": {"low": -1.0, "high": -1.0},
+    "n0": {"low": 0.0, "high": 0.0},
+    "logthc": {"low": -1.5, "high": -0.2},  #
+    "logthv": {"low": -3.0, "high": -0.2},  # On-axis: thv << thc
+    "p": {"low": 2.1, "high": 2.8},  # Fixed
+    "s": {"low": 0.0, "high": 0.0},
+    "loglf": {"low": 1, "high": 4},
+    "logA": {"low": -3, "high": 0.5},
+    "k_m": {"low": 0.5, "high": 2.0},
 }
 #
 priors_250916A = {
@@ -473,9 +537,9 @@ priors_250916A_offax_gam10 = {
     "logA": {"low": 0, "high": 0},
 }
 
-priors_260924A = {
+priors_GRB260924A_ism = {
     # Isotropic equivalent energy [erg] — wide range to accommodate various energies
-    "loge0": {"low": 53, "high": 56},
+    "loge0": {"low": 55.0, "high": 57.0},
     # Magnetic field equipartition fraction
     "logepsb": {"low": -6, "high": -1},
     # Electron equipartition fraction
@@ -491,14 +555,14 @@ priors_260924A = {
     # Jet structure power-law index
     "s": {"low": 6, "high": 6},
     # log initial Lorentz factor
-    "loglf": {"low": 2, "high": 2.0},  # Γ₀ ~ 10–10,000
+    "loglf": {"low": 1, "high": 4.0},  # Γ₀ ~ 10–10,000
     # Wind-like medium parameter
     "logA": {"low": 0, "high": 0},
 }
 
 priors_GRB260924A_wind = {
     # Isotropic equivalent energy [erg] — wide range to accommodate various energies
-    "loge0": {"low": 53, "high": 56},
+    "loge0": {"low": 55.0, "high": 57.0},
     # Magnetic field equipartition fraction
     "logepsb": {"low": -6, "high": -1},
     # Electron equipartition fraction
@@ -514,7 +578,55 @@ priors_GRB260924A_wind = {
     # Jet structure power-law index
     "s": {"low": 6, "high": 6},
     # log initial Lorentz factor
-    "loglf": {"low": 2, "high": 2.0},  # Γ₀ ~ 10–10,000
+    "loglf": {"low": 1, "high": 4.0},  # Γ₀ ~ 10–10,000
+    # Wind-like medium parameter
+    "logA": {"low": -3.0, "high": 0.5},  # Wind medium strongly motivated
+    "k_m": {"low": 2.0, "high": 2.0},
+}
+
+priors_GRB260924A_wind_fixk = {
+    # Isotropic equivalent energy [erg] — wide range to accommodate various energies
+    "loge0": {"low": 55.0, "high": 57.0},
+    # Magnetic field equipartition fraction
+    "logepsb": {"low": -6, "high": -1},
+    # Electron equipartition fraction
+    "logepse": {"low": -2.5, "high": -0.3},
+    # ISM number density [cm^-3]. Set to 0 for pure wind.
+    "n0": {"low": 0.0, "high": 0.0},
+    # Half-opening angle of jet core [rad]
+    "logthc": {"low": -3.5, "high": -0.2},
+    # Viewing angle [rad]
+    "logthv": {"low": -5.0, "high": -0.2},  # ~0.003–3 rad
+    # Electron spectral index
+    "p": {"low": 2.01, "high": 3.2},
+    # Jet structure power-law index
+    "s": {"low": 6, "high": 6},
+    # log initial Lorentz factor
+    "loglf": {"low": 1, "high": 4.0},  # Γ₀ ~ 10–10,000
+    # Wind-like medium parameter
+    "logA": {"low": -3.0, "high": 0.5},  # Wind medium strongly motivated
+    "k_m": {"low": 0.67, "high": 0.67},
+}
+
+priors_GRB260924A_wind_fixe = {
+    # Isotropic equivalent energy [erg] — wide range to accommodate various energies
+    "loge0": {"low": 55.0, "high": 57.0},
+    # Magnetic field equipartition fraction
+    "logepsb": {"low": -6, "high": -1},
+    # Electron equipartition fraction
+    "logepse": {"low": -1.0, "high": -1.0},
+    # ISM number density [cm^-3]. Set to 0 for pure wind.
+    "n0": {"low": 0.0, "high": 0.0},
+    # Half-opening angle of jet core [rad]
+    "logthc": {"low": -3.5, "high": -0.2},
+    # Viewing angle [rad]
+    "logthv": {"low": -5.0, "high": -0.2},  # ~0.003–3 rad
+    # Electron spectral index
+    "p": {"low": 2.01, "high": 3.2},
+    # Jet structure power-law index
+    "s": {"low": 6, "high": 6},
+    # log initial Lorentz factor
+    "loglf": {"low": 1, "high": 4.0},  # Γ₀ ~ 10–10,000
     # Wind-like medium parameter
     "logA": {"low": -3.0, "high": 0.5},  # Wind medium strongly motivated
     "k_m": {"low": 1.0, "high": 3.0},
@@ -628,7 +740,10 @@ priors_map = {
     "structured_offaxis": priors_structured_offaxis,
     "tophat": priors_tophat,
     "230812B": priors_230812B,
-    "230812B_wind": priors_230812B_wind,
+    "230812B_ism_spec": priors_230812B_ism_spec,
+    "230812B_wind_spec": priors_230812B_wind_spec,
+    "230812B_wind": priors_230812B_wind_jetsimpy,
+    "230812B_wind_vegas": priors_230812B_wind_vegas,
     "250916A": priors_250916A,
     "250916A_Gamma": priors_250916A_Gamma,
     "250916A_onax": priors_250916A_onax,
@@ -645,11 +760,15 @@ priors_map = {
     "250916A_gam2": priors_250916A_gam2,
     "250916A_gam3": priors_250916A_gam3,
     "250916A_gam5": priors_250916A_gam5,
-    "260924A": priors_260924A,
+    #"260924A": priors_260924A,
     "generic_highb": priors_generic_highb,
     "generic_wind": priors_generic_wind,
+    "generic_wind_fixe": priors_generic_wind_fixe,
     "generic_ism_plus_wind": priors_generic_ism_plus_wind,
     "GRB260924A_wind": priors_GRB260924A_wind,
+    "GRB260924A_wind_fixe": priors_GRB260924A_wind_fixe,
+    "GRB260924A_wind_fixk": priors_GRB260924A_wind_fixk,
+    "GRB260924A_ism": priors_GRB260924A_ism,
     "GRB260924A_ism_plus_wind": priors_GRB260924A_ism_plus_wind,
     "ism_plus_wind_fixlf": priors_ism_plus_wind_fixlf,
     "wind_fixlf": priors_wind_fixlf,

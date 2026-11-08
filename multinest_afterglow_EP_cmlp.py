@@ -157,6 +157,64 @@ UL_MIN_FRACTIONAL_ERROR = 1e-4
 LLH_PENALTY = -1e100
 
 
+def log_likelihood_old(cube, ndim, nparams):
+    # in log space
+    params = {name: cube[i] for i, name in enumerate(param_names)}
+    for name in priors_uniform.keys():
+        if priors_uniform[name]["low"] == priors_uniform[name]["high"]:
+            params[name] = priors_uniform[name]["low"]
+    params["jetType"] = args.jetType
+    params["z"] = args.redshift
+    # print("params:", params)
+    try:
+        model_flux = model(obs_time, obs_nu, params_for_jetsimpy_model(params))
+        # print("model_flux:", model_flux)
+    except Exception as e:
+        logger.warning("log_likelihood: model failed (%s); returning penalty llh", e)
+        return -1e100
+
+    # Residuals and chi2 term
+    residual = 1 - (model_flux / obs_flux)
+    if np.any(obs_ul):
+        # For upper limits: very high residual if model exceeds limit, else zero
+        residual[obs_ul] = np.where(
+            model_flux[obs_ul] > obs_flux[obs_ul],
+            1e10,  # Infinite penalty if model exceeds the upper limit
+            0.0,  # Zero penalty if model respects the limit
+        )
+
+    try:
+        chi2_terms = 0.5 * (residual / err) ** 2
+    except RuntimeWarning as e:
+        print("Residual min/max:", np.nanmin(residual), np.nanmax(residual))
+        print("Err min/max:", np.nanmin(err), np.nanmax(err))
+        # print("Ratio min/max:", np.nanmin(ratio), np.nanmax(ratio))
+        print("Any inf residual:", np.isinf(residual).any())
+        print("Any inf err:", np.isinf(err).any())
+
+        warnings.filterwarnings("error", category=RuntimeWarning)
+        print(f"Fatal RuntimeWarning: {e}")
+        sys.exit(1)
+
+    if args.use_band_weights or args.equal_band_weights:
+        chi2_terms *= obs_weights
+    chi2 = np.sum(chi2_terms)
+    # logger.info(f"weighted residuals={residuals}")
+    # llh = -0.5 * np.sum(residuals**2)
+    llh = logdet - chi2
+    global count
+    count += 1
+    if count % 1000 == 0:
+        logger.info(f"count={count}, llh={llh}")
+    global maxllh
+    if llh > maxllh:
+        maxllh = llh
+        # params_str = ", ".join( f"{param}={cube[i]:.8f}" for i, param in enumerate(param_names))
+        # logger.info(f"Log-likelihood: {llh}, {params_str}, \nobs_flux={obs_flux}\n, model_flux={model_flux}")
+    # print("llh:", llh)
+    return llh
+
+
 def log_likelihood(cube, ndim, nparams):
     """Log-normal detections and censored linear-flux upper limits.
 
@@ -181,6 +239,7 @@ def log_likelihood(cube, ndim, nparams):
         model_flux = model(obs_time, obs_nu, params_for_jetsimpy_model(params))
     except Exception as e:
         logger.warning("log_likelihood: model failed (%s); returning penalty llh", e)
+        logger.warning("params: %s, obs_time: %s, obs_nu: %s", params, obs_time, obs_nu)
         return LLH_PENALTY
 
     model_flux = np.asarray(model_flux, dtype=float).reshape(-1)
@@ -586,12 +645,8 @@ if not args.post_process_only and not args.plot_only:
     bad_det = det & (~np.isfinite(obs_flux_err) | (obs_flux_err <= 0))
     if np.any(bad_det):
         n_bad = int(bad_det.sum())
-        logger.error(
-            "%d detections have non-positive or non-finite FluxErrs", n_bad
-        )
-        raise ValueError(
-            f"{n_bad} detections have non-positive or non-finite FluxErrs"
-        )
+        logger.error("%d detections have non-positive or non-finite FluxErrs", n_bad)
+        raise ValueError(f"{n_bad} detections have non-positive or non-finite FluxErrs")
 
     # σ on ln(flux). Fixed by the data, so the normalization is constant.
     sigma_ln = np.full(len(obs_flux), np.nan, dtype=float)
@@ -624,10 +679,13 @@ if not args.post_process_only and not args.plot_only:
                 UL_MIN_FRACTIONAL_ERROR,
             )
         logger.info(
-            "Upper limits enter as ln Φ((F_lim - F_model) / sigma), "
-            "n_ul=%d.",
+            "Upper limits enter as ln Φ((F_lim - F_model) / sigma), n_ul=%d.",
             int(obs_ul.sum()),
         )
+
+    err = np.where(obs_flux > 0, obs_flux_err / obs_flux, np.inf)
+    err = np.where(err <= 0, np.finfo(float).tiny, err)
+    logdet = np.sum(np.log(2.0 * np.pi * err**2))
 
     obs_weights = np.ones(len(obs_flux), dtype=float)
     if args.use_band_weights and args.equal_band_weights:
