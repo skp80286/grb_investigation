@@ -1,0 +1,108 @@
+\begin{thebibliography}{16}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[{Abdollahi} et~al.(2022)]{Abdollahi2022}
+S.~{Abdollahi} et~al.
+\newblock Incremental fermi large area telescope fourth source catalog.
+\newblock \emph{ApJS}, 260:\penalty0 53, 2022.
+\newblock \doi{10.3847/1538-4365/ac6751}.
+
+\bibitem[{Ajello} et~al.(2019)]{Ajello2019}
+M.~{Ajello} et~al.
+\newblock A decade of gamma-ray bursts observed by fermi-lat: The second grb
+  catalog.
+\newblock \emph{ApJ}, 878:\penalty0 52, 2019.
+\newblock \doi{10.3847/1538-4357/ab1d4e}.
+
+\bibitem[{Atwood} et~al.(2009)]{Atwood2009}
+W.~B. {Atwood} et~al.
+\newblock The large area telescope on the fermi gamma-ray space telescope
+  mission.
+\newblock \emph{ApJ}, 697:\penalty0 1071, 2009.
+\newblock \doi{10.1088/0004-637X/697/2/1071}.
+
+\bibitem[{Ballet} et~al.(2023){Ballet}, {Bruel}, {Burnett}, {Lott}, and {The
+  Fermi-LAT collaboration}]{Ballet2023}
+J.~{Ballet}, P.~{Bruel}, T.~H. {Burnett}, B.~{Lott}, and {The Fermi-LAT
+  collaboration}.
+\newblock Fermi large area telescope fourth source catalog data release 4
+  (4fgl-dr4), 2023.
+
+\bibitem[{Bloom} et~al.(2001){Bloom}, {Frail}, and {Sari}]{Bloom2001}
+J.~S. {Bloom}, D.~A. {Frail}, and R.~{Sari}.
+\newblock The prompt energy release of gamma-ray bursts using a cosmological
+  k-correction.
+\newblock \emph{AJ}, 121:\penalty0 2879, 2001.
+\newblock \doi{10.1086/321093}.
+
+\bibitem[{Bruel} et~al.(2018){Bruel}, {Burnett}, {Digel}, et~al.]{Bruel2018}
+P.~{Bruel}, T.~H. {Burnett}, S.~W. {Digel}, et~al.
+\newblock Fermi-lat improved pass~8 event selection, 2018.
+
+\bibitem[{Fermi Science Support Development Team}(2019)]{Fermitools2019}
+{Fermi Science Support Development Team}.
+\newblock Fermitools: Fermi science tools.
+\newblock Astrophysics Source Code Library, ascl:1905.011, 2019.
+
+\bibitem[{Kumar} and {Barniol Duran}(2009)]{Kumar2009}
+P.~{Kumar} and R.~{Barniol Duran}.
+\newblock On the generation of high-energy photons detected by the fermi
+  satellite from gamma-ray bursts.
+\newblock \emph{MNRAS}, 400:\penalty0 L75, 2009.
+\newblock \doi{10.1111/j.1745-3933.2009.00766.x}.
+
+\bibitem[{Kumar} and {Barniol Duran}(2010)]{Kumar2010}
+P.~{Kumar} and R.~{Barniol Duran}.
+\newblock External forward shock origin of high-energy emission for three
+  gamma-ray bursts detected by fermi.
+\newblock \emph{MNRAS}, 409:\penalty0 226, 2010.
+\newblock \doi{10.1111/j.1365-2966.2010.17274.x}.
+
+\bibitem[{Mattox} et~al.(1996)]{Mattox1996}
+J.~R. {Mattox} et~al.
+\newblock The likelihood analysis of egret data.
+\newblock \emph{ApJ}, 461:\penalty0 396, 1996.
+\newblock \doi{10.1086/177068}.
+
+\bibitem[{Meegan} et~al.(2009)]{Meegan2009}
+C.~{Meegan} et~al.
+\newblock The fermi gamma-ray burst monitor.
+\newblock \emph{ApJ}, 702:\penalty0 791, 2009.
+\newblock \doi{10.1088/0004-637X/702/1/791}.
+
+\bibitem[{Planck Collaboration}(2020)]{Planck2020}
+{Planck Collaboration}.
+\newblock Planck 2018 results. vi. cosmological parameters.
+\newblock \emph{A\&A}, 641:\penalty0 A6, 2020.
+\newblock \doi{10.1051/0004-6361/201833910}.
+
+\bibitem[{Scargle} et~al.(2013){Scargle}, {Norris}, {Jackson}, and
+  {Chiang}]{Scargle2013}
+J.~D. {Scargle}, J.~P. {Norris}, B.~{Jackson}, and J.~{Chiang}.
+\newblock Studies in astronomical time series analysis. vi. bayesian block
+  representations.
+\newblock \emph{ApJ}, 764:\penalty0 167, 2013.
+\newblock \doi{10.1088/0004-637X/764/2/167}.
+
+\bibitem[{TODO}(2026{\natexlab{a}})]{Redshift}
+{TODO}.
+\newblock Redshift of grb 260924a (gcn circular to be inserted),
+  2026{\natexlab{a}}.
+
+\bibitem[{TODO}(2026{\natexlab{b}})]{XRTposition}
+{TODO}.
+\newblock Swift/xrt position of grb 260924a (gcn circular to be inserted),
+  2026{\natexlab{b}}.
+
+\bibitem[{Wilks}(1938)]{Wilks1938}
+S.~S. {Wilks}.
+\newblock The large-sample distribution of the likelihood ratio for testing
+  composite hypotheses.
+\newblock \emph{Ann. Math. Stat.}, 9:\penalty0 60, 1938.
+\newblock \doi{10.1214/aoms/1177732360}.
+
+\end{thebibliography}

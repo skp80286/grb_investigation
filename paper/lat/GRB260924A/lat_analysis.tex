@@ -1,0 +1,429 @@
+% Fermi-LAT analysis of GRB 260924A.
+% Numbers come from lat_numbers.json and the tab_lat_*.tex files written by make_lat_products.py.
+
+\subsection{Fermi-LAT data analysis}
+\label{sec:lat}
+
+\subsubsection{Data and event selection}
+\label{sec:lat:data}
+
+GRB 260924A triggered the \emph{Fermi} Gamma-ray Burst Monitor \citep[GBM;][]{Meegan2009} at
+$T_0 = 2026$ September 24 01:13:23.562 UTC (mission elapsed time 811905208.562~s; trigger \texttt{bn260924051}).
+We analysed the Large Area Telescope \citep[LAT;][]{Atwood2009} data at the X-ray afterglow position,
+$(\alpha, \delta)_{\rm J2000} = (133\fdg76, +12\fdg04)$ \citep{XRTposition}, at the redshift $z = 3.51$ \citep{Redshift}.
+We retrieved the extended Pass~8 event file, which contains the transient event classes, and the spacecraft file from
+the \emph{Fermi} Science Support Center for $T_0-100$~s to $T_0+1100$~s within $25^\circ$ of the burst position.
+The analysis used Fermitools v2.5.1 \citep{Fermitools2019} with the \texttt{P8R3\_TRANSIENT020\_V3} instrument
+response functions \citep{Bruel2018}, FRONT and BACK events combined, and an energy range of 100~MeV--100~GeV.
+\texttt{TRANSIENT020} is the class recommended for GRBs, where the source dominates the photon count over short
+intervals and a larger effective area outweighs a higher background rate.
+
+To suppress gamma rays from the Earth's limb we applied a zenith-angle cut of $\zeta_{\max} = 100^\circ$
+together with the region-of-interest (ROI) based time filter of \texttt{gtmktime}. That filter keeps a time $t$
+only if the entire circular ROI of radius $r$ lies above the limb,
+\begin{equation}
+  \zeta(t) + r \le \zeta_{\max},
+  \label{eq:roicut}
+\end{equation}
+where $\zeta(t)$ is the zenith angle of the burst. We also required good data quality and science configuration of
+the instrument (\texttt{DATA\_QUAL>0 \&\& LAT\_CONFIG==1}); all spacecraft records in the interval satisfied
+these conditions, and the observatory did not enter the South Atlantic Anomaly.
+
+\subsubsection{Definition of the analysis intervals}
+\label{sec:lat:windows}
+
+All interval boundaries were derived from the data rather than fixed by hand. They follow from three
+constraints: the Earth-limb condition of Eq.~(\ref{eq:roicut}), the off-axis angle of the burst, and the
+structure of the prompt keV--MeV emission.
+
+\paragraph{Observing geometry.}
+Figure~\ref{fig:lat:geometry} shows the angles of the burst during the observation. At $T_0$ the burst
+was $\theta = 57\fdg9$ from the LAT boresight and $\zeta = 88\fdg5$ from the zenith. The zenith angle then
+decreased steadily as the burst rose above the limb. By Eq.~(\ref{eq:roicut}), a $10^\circ$ ROI is usable
+from $T_0-20.0$~s, whereas a $15^\circ$ ROI becomes usable only from $t_{15} = T_0+70.0$~s. Both stay usable
+until the end of the data. The off-axis angle decreased to a minimum of $37\fdg2$ at $T_0+655$~s and then
+increased, crossing $\theta_{\max} = 70^\circ$ at $T_0+972.8$~s. Beyond this angle the effective area is
+small and the instrument response is less well calibrated, so we ended the LAT window there.
+
+\begin{figure}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/lat_geometry.pdf}
+  \caption{Off-axis angle $\theta$ (solid) and zenith angle $\zeta$ (dashed) of GRB 260924A. Dotted horizontal
+  lines mark the largest zenith angle allowed by Eq.~(\ref{eq:roicut}) for the $10^\circ$ (green) and $15^\circ$
+  (orange) ROIs, and the dash-dotted line the off-axis limit $\theta_{\max}=70^\circ$. The shaded regions are the
+  windows of Analysis~A (green) and Analysis~B (orange).}
+  \label{fig:lat:geometry}
+\end{figure}
+
+\paragraph{Prompt emission episodes.}
+We identified the emission episodes in the GBM CTIME data, which have 0.256~s native resolution, rebinned to
+1.024~s. We summed the 10--1000~keV light curves of the three NaI detectors with the largest excess over
+background (n3, n5 and n4, at 201, 162 and 160$\sigma$). The background rate was modelled as a polynomial
+\begin{equation}
+  B(t) = \sum_{k=0}^{n} c_k\, t^k
+  \label{eq:gbmbkg}
+\end{equation}
+fitted to the intervals $[-150, -15]$~s and $[420, 600]$~s. We adopted the lowest order $n$ whose mean squared
+Poisson residual in these intervals did not exceed 1.2. That was $n = 3$: the residuals were 1.228, 1.201 and 1.198
+for $n = 1$, 2 and 3. We then segmented the light curve with Bayesian blocks \citep{Scargle2013}, using a false
+positive probability $p_0 = 0.01$ per change point. For each block $j$ we computed the excess significance
+$S_j = (N_j - B_j)/\sqrt{B_j}$ from the observed and background counts, and defined an episode as a maximal run of
+consecutive blocks with $S_j \ge 3$ between the two background intervals.
+
+This yielded two episodes: $[-8.2, 231.5]$~s, made of 64 blocks, and $[331.8, 397.3]$~s, made of 15 blocks
+(Figure~\ref{fig:lat:lc}a). The first episode was the same for every background order considered. The start of the
+second moved to 303.1~s for $n = 1$. For comparison, the GBM catalogue gives $T_{90} = 337.9$~s starting at $T_0+9.2$~s.
+After $\sim$400~s, the excess in GBM depends on the assumed background model; across all plausible models it ranges
+from $-13\sigma$ to $+15\sigma$. GBM therefore neither detects nor excludes keV emission at those times.
+
+\paragraph{Analyses A and B.}
+The geometry offers a trade-off. A $15^\circ$ ROI collects more of the point-spread function (PSF) at
+100~MeV, where the 68\% containment radius of \texttt{TRANSIENT020} is several degrees, but it misses the first
+70~s of the burst. We therefore performed two independent analyses that differ only in the ROI:
+\begin{description}
+  \item[Analysis A] used a $10^\circ$ ROI over the first GBM episode, $[-8.2, 231.5]$~s. We fitted the whole episode,
+    the part before $t_{15}$ that only this ROI covers, and the interval shared with Analysis~B.
+  \item[Analysis B] used a $15^\circ$ ROI over the full LAT window, $[70.0, 972.8]$~s. We fitted it as a whole and
+    in adaptive time bins (Section~\ref{sec:lat:bins}).
+\end{description}
+The common interval $[t_{15}, t_{\rm ep1,end}] = [70.0, 231.5]$~s is covered by both and serves to compare them.
+
+\subsubsection{Likelihood analysis}
+\label{sec:lat:like}
+
+For each interval we performed an unbinned maximum-likelihood analysis \citep{Mattox1996} with
+\texttt{pyLikelihood}. The log-likelihood is
+\begin{equation}
+  \ln\mathcal{L} = \sum_{i=1}^{N_{\rm ev}} \ln M(E'_i, \hat{p}'_i, t_i) - N_{\rm pred},
+  \label{eq:like}
+\end{equation}
+with the model count density
+\begin{equation}
+  M(E', \hat{p}', t) = \sum_s \int\!\!\int R(E', \hat{p}' \mid E, \hat{p}, t)\, S_s(E, \hat{p})\, dE\, d\Omega,
+  \label{eq:model}
+\end{equation}
+where primed quantities are reconstructed and unprimed are true energies and directions. $R$ is the instrument
+response, which factorises into the effective area, the PSF and the energy dispersion. $S_s$ is the intensity of
+source $s$, and $N_{\rm pred}$ is the total number of counts the model predicts in the ROI. The exposure entering
+$N_{\rm pred}$ was computed from a livetime cube with $\Delta\cos\theta = 0.025$ and an exposure map extending
+$10^\circ$ beyond the ROI. Energy dispersion was not modelled.
+
+The burst was modelled as a point source with a power-law spectrum parametrised by the integrated photon flux,
+\begin{equation}
+  \frac{dN}{dE} = F\,\frac{(\gamma + 1)\,E^{\gamma}}{E_{\max}^{\gamma+1} - E_{\min}^{\gamma+1}},
+  \qquad
+  F = \int_{E_{\min}}^{E_{\max}} \frac{dN}{dE}\,dE,
+  \label{eq:pl2}
+\end{equation}
+with $E_{\min} = 100$~MeV, $E_{\max} = 100$~GeV, and both $F$ and the photon index $\gamma$ free. With this
+parametrisation $F$ and $\gamma$ are only weakly correlated. The energy flux is
+$F_E = \int E\,(dN/dE)\,dE$. The background model contained the Galactic interstellar emission model
+\texttt{gll\_iem\_v07} and the isotropic template \texttt{iso\_P8R3\_TRANSIENT020\_V3\_v1}, each with a free
+normalization constrained to $[0, 10]$. It also contained the 243 4FGL-DR4 point sources \citep{Abdollahi2022,
+Ballet2023} within $25^\circ$, fixed at their catalogue spectra; no extended sources lie in this region. The fit
+used the DRMNFB optimizer followed by \textsc{NewMinuit}. We took parameter uncertainties from the covariance matrix.
+
+The detection significance is the test statistic
+\begin{equation}
+  {\rm TS} = 2\left(\ln\mathcal{L}_1 - \ln\mathcal{L}_0\right),
+  \label{eq:ts}
+\end{equation}
+where $\mathcal{L}_1$ and $\mathcal{L}_0$ are the maximum likelihoods with and without the burst; the background was
+refitted in the null case. By Wilks' theorem \citep{Wilks1938}, TS follows a $\chi^2$ distribution with two degrees
+of freedom when no source is present, so ${\rm TS} = 25$ corresponds to $4.6\sigma$. We consider ${\rm TS} \ge 25$
+a detection. Otherwise we fixed $\gamma = -2$ and quoted the 95\% one-sided profile-likelihood upper limit on $F$,
+where $\ln\mathcal{L}$ falls by $1.355$ from its maximum.
+
+Analyses A and B are not statistically independent. Every event in the $10^\circ$ ROI is also in the $15^\circ$
+ROI, so the two fits of the common interval share their photons. We therefore quote the significance of an index
+difference $\Delta\gamma = \gamma_{10} - \gamma_{15}$ in two ways: assuming independent errors,
+$\sigma_{\rm naive} = (\sigma_{10}^2 + \sigma_{15}^2)^{1/2}$, and for nested samples,
+\begin{equation}
+  \sigma_{\rm nested} = \left|\sigma_{10}^2 - \sigma_{15}^2\right|^{1/2},
+  \label{eq:nested}
+\end{equation}
+which is the appropriate error when one data set contains the other. The naive form understates the significance
+of any difference.
+
+\subsubsection{Adaptive time binning}
+\label{sec:lat:bins}
+
+We first cut the Analysis~B window at the GBM episode boundaries inside it (231.5, 331.8 and 397.3~s), so that
+no bin mixes episodes. We then bisected each segment at the median arrival time of events within $3^\circ$ of the
+burst, keeping the split only if both halves reached ${\rm TS} \ge 25$ and lasted at least 5~s. This was
+repeated until no split was accepted. The procedure produced 27 bins, all detections. Table~\ref{tab:lat:bins}
+lists them.
+
+To test the robustness of the results to the event class, we refitted the common interval in
+\texttt{TRANSIENT020E} and \texttt{SOURCE} for both ROIs. We also refitted every Analysis~B bin in \texttt{SOURCE},
+with the \texttt{P8R3\_SOURCE\_V3} responses and the matching isotropic template. Finally, we computed with
+\texttt{gtsrcprob} the probability that each event belongs to the burst,
+\begin{equation}
+  p_i = \frac{M_{\rm GRB}(E'_i, \hat{p}'_i)}{\sum_s M_s(E'_i, \hat{p}'_i)},
+  \label{eq:prob}
+\end{equation}
+using the best-fit models of the full Analysis~A and B windows.
+
+\subsubsection{Results}
+\label{sec:lat:results}
+
+\begin{table*}
+  \centering
+  \caption{Likelihood results for the analysis windows. $N_{\rm ev}$ is the number of events in the ROI and
+  $N_{\rm pred}$ the number predicted for the burst. $F$ and $F_E$ are the 0.1--100~GeV photon and energy fluxes.
+  The interval before $t_{15}$ is not detected; we give the 95\% upper limit with $\gamma=-2$ fixed.}
+  \label{tab:lat:windows}
+  \begin{tabular}{llrrrrccc}
+    \hline
+    Analysis & ROI & Interval & $N_{\rm ev}$ & $N_{\rm pred}$ & TS & $\gamma$ & $F$ & $F_E$ \\
+     & & (s) & & & & & ($10^{-5}$ ph cm$^{-2}$ s$^{-1}$) & ($10^{-8}$ erg cm$^{-2}$ s$^{-1}$) \\
+    \hline
+    \input{tab_lat_windows.tex}
+  \end{tabular}
+\end{table*}
+
+\paragraph{Detection and onset.}
+The burst is strongly detected in both analyses (Table~\ref{tab:lat:windows}). Over the first GBM episode the
+$10^\circ$ analysis gives ${\rm TS} = 1316$, $\gamma = -2.22 \pm 0.07$ and
+$F = (2.92 \pm 0.20)\times10^{-4}$~ph~cm$^{-2}$~s$^{-1}$. Over the full LAT window the $15^\circ$ analysis gives
+${\rm TS} = 1515$, $\gamma = -2.21 \pm 0.06$ and $F = (9.17 \pm 0.54)\times10^{-5}$~ph~cm$^{-2}$~s$^{-1}$.
+Between $-8.2$ and $70.0$~s, the stretch only the $10^\circ$ ROI covers, we find just six events with $p > 0.9$
+(Figure~\ref{fig:lat:lc}b) and ${\rm TS} = 18$. The 95\% upper limit is
+$F < 4.3\times10^{-5}$~ph~cm$^{-2}$~s$^{-1}$, a factor of 36 below the flux in the first $15^\circ$ bin,
+$70.0$--$82.8$~s, where $F = (1.53 \pm 0.20)\times10^{-3}$~ph~cm$^{-2}$~s$^{-1}$. The upper limit is corrected
+for exposure. If emission at the flux of the first $15^\circ$ bin had occurred before $t_{15}$, it could have
+lasted at most $\sim$2~s. The bright $>100$~MeV emission therefore started close to $t_{15}$, at least
+$\sim$78~s (17~s in the rest frame) after the GBM episode began.
+
+\begin{figure*}
+  \centering
+  \includegraphics[width=0.85\textwidth]{figures/lat_lightcurve.pdf}
+  \caption{Multi-wavelength light curve of GRB 260924A. (a) Background-subtracted GBM NaI count rate (grey) and its
+  Bayesian-block representation (black). (b) Energies of LAT events in the $15^\circ$ ROI, with burst probability
+  $p>0.9$ (black) or $p<0.9$ (grey), and $p>0.9$ events in the $10^\circ$ ROI before $t_{15}$ (green squares).
+  (c) 0.1--100~GeV photon flux in the Analysis~B bins (orange) and Analysis~A windows (green); the arrow is the 95\%
+  upper limit before $t_{15}$. (d) Photon index; the orange band is the weighted mean of the Analysis~B bins with its
+  $1\sigma$ error. Grey shading marks the GBM episodes; vertical dotted lines mark the start and end of the
+  Analysis~B window.}
+  \label{fig:lat:lc}
+\end{figure*}
+
+\paragraph{Comparison of the two ROIs.}
+In the common interval, the two ROIs give practically identical spectra (Table~\ref{tab:lat:common};
+Figure~\ref{fig:lat:sed}a). With \texttt{TRANSIENT020} we obtain $\gamma = -2.21 \pm 0.07$ in $10^\circ$ and
+$-2.21 \pm 0.08$ in $15^\circ$. The difference is $\Delta\gamma = 0.001$, which is $0.13\sigma$ even with the
+nested error of Eq.~(\ref{eq:nested}), and the fluxes agree to 0.5\%. The 15 extra events in the larger ROI are
+absorbed almost entirely by the diffuse components: $N_{\rm pred}$ for the burst rises from 222 to 229. The same
+holds for \texttt{TRANSIENT020E} and for \texttt{SOURCE} (Figure~\ref{fig:lat:sed}b). \texttt{SOURCE} gives a
+slightly harder index, $\gamma \approx -2.15$, which is consistent with \texttt{TRANSIENT020} within $0.6\sigma$.
+
+\begin{table*}
+  \centering
+  \caption{Spectral comparison of the $10^\circ$ (Analysis~A) and $15^\circ$ (Analysis~B) ROIs on the common interval
+  $[70.0, 231.5]$~s for three event classes. Entries with a slash give the $10^\circ$ / $15^\circ$ values. The
+  significance of $\Delta\gamma=\gamma_{10}-\gamma_{15}$ is quoted with independent and nested
+  (Eq.~\ref{eq:nested}) errors.}
+  \label{tab:lat:common}
+  \begin{tabular}{lcccccc}
+    \hline
+    Event class & $N_{\rm ev}$ & TS & $\gamma_{10}$ & $\gamma_{15}$ & $\Delta\gamma/\sigma$ (naive / nested) & $F_{10}/F_{15}$ \\
+    \hline
+    \input{tab_lat_common.tex}
+  \end{tabular}
+\end{table*}
+
+\begin{figure*}
+  \centering
+  \includegraphics[width=0.85\textwidth]{figures/lat_sed_common.pdf}
+  \caption{(a) Spectral energy distribution of the common interval $[70.0, 231.5]$~s in \texttt{TRANSIENT020} for the
+  $10^\circ$ and $15^\circ$ ROIs. The bands are the 68\% range of $10^4$ power laws drawn from the fitted $(F,\gamma)$
+  covariance. (b) Photon index on the common interval for the three event classes and both ROIs.}
+  \label{fig:lat:sed}
+\end{figure*}
+
+\paragraph{Spectral evolution.}
+The photon index shows no significant change across the 27 bins (Figure~\ref{fig:lat:lc}d). A constant index
+fits with weighted mean $\bar{\gamma} = -2.18 \pm 0.06$ and $\chi^2 = 21.2$ for 26 degrees of freedom ($p = 0.73$).
+The 14 bins inside the first GBM episode average $-2.18 \pm 0.07$ and the 13 later bins $-2.19 \pm 0.11$. The
+largest deviation is the bin $141.6$--$151.9$~s, with $\gamma = -1.63 \pm 0.21$, $2.6\sigma$ harder than the
+mean. With 27 bins, a deviation at least that large occurs by chance with probability 0.22. The \texttt{SOURCE}
+refits confirm this picture. Of the 27 bins, 20 remain detected, and their indices agree with \texttt{TRANSIENT020}
+to better than $0.8\sigma$ in every case, with a median flux ratio of 0.94. The remaining seven have
+${\rm TS} = 20$--25 in \texttt{SOURCE}, as expected for a class that keeps about two thirds of the photons.
+
+\paragraph{Spectral curvature.}
+To test whether the spectrum is curved rather than a single power law, we refitted the main intervals with a
+log-parabola,
+\begin{equation}
+  \frac{dN}{dE} = N_0 \left(\frac{E}{E_b}\right)^{-\alpha - \beta_{\rm c}\ln(E/E_b)},
+  \label{eq:logparabola}
+\end{equation}
+with the pivot fixed at $E_b = 1$~GeV and $N_0$, $\alpha$ and $\beta_{\rm c}$ free. We write the curvature as
+$\beta_{\rm c}$ because $\beta$ is used below for the energy spectral index. Setting $\beta_{\rm c} = 0$ recovers a
+power law, so the improvement
+\begin{equation}
+  {\rm TS}_{\rm curv} = 2\left(\ln\mathcal{L}_{\rm LP} - \ln\mathcal{L}_{\rm PL}\right)
+  \label{eq:tscurv}
+\end{equation}
+has one degree of freedom, and $\sqrt{{\rm TS}_{\rm curv}}$ is its significance. A positive $\beta_{\rm c}$ means the
+spectrum softens toward higher energy, as a cooling break or a cutoff inside the band would, and a negative value
+means it hardens. The results are in Table~\ref{tab:lat:curv}. In every interval $\beta_{\rm c}$ is slightly
+negative but consistent with zero: the largest improvement is ${\rm TS}_{\rm curv} = 0.99$ ($1.0\sigma$) for the
+full Analysis~B window, where $\beta_{\rm c} = -0.037 \pm 0.036$. The interval after the first GBM episode, the part
+of the emission most likely to be afterglow, gives $\beta_{\rm c} = -0.049 \pm 0.063$ and
+${\rm TS}_{\rm curv} = 0.53$. Because $\beta_{\rm c}$ is not positive, the spectral energy distribution has no peak
+inside 0.1--100~GeV. A power law is therefore an adequate description of the LAT spectrum, and there is no evidence
+for a spectral break within the band.
+
+\begin{table*}
+  \centering
+  \caption{Power-law and log-parabola fits (Eq.~\ref{eq:logparabola}) of the main intervals, all in
+  \texttt{TRANSIENT020}. $\gamma$ is the power-law photon index; $\alpha$ and $\beta_{\rm c}$ are the log-parabola
+  parameters at $E_b=1$~GeV. ${\rm TS}_{\rm curv}$ (Eq.~\ref{eq:tscurv}) is the improvement of the log-parabola over
+  the power law.}
+  \label{tab:lat:curv}
+  \begin{tabular}{llccccc}
+    \hline
+    Analysis & ROI & Interval (s) & $\gamma$ & $\alpha$ & $\beta_{\rm c}$ & ${\rm TS}_{\rm curv}$ \\
+    \hline
+    \input{tab_lat_curvature.tex}
+  \end{tabular}
+\end{table*}
+
+\begin{table*}
+  \centering
+  \caption{Analysis~B: $15^\circ$ ROI, \texttt{TRANSIENT020}, adaptive time bins. Columns 2--7 give the bin
+  interval, number of events, TS, photon index, and 0.1--100~GeV photon and energy fluxes (units as in
+  Table~\ref{tab:lat:windows}). The last two columns give the index and TS of the \texttt{SOURCE}-class refit;
+  ``\ldots'' marks bins with ${\rm TS}<25$ in that class.}
+  \label{tab:lat:bins}
+  \begin{tabular}{rrrrcccrr}
+    \hline
+    Bin & Interval (s) & $N_{\rm ev}$ & TS & $\gamma$ & $F$ & $F_E$ & $\gamma_{\rm SOURCE}$ & TS$_{\rm SOURCE}$ \\
+    \hline
+    \input{tab_lat_bins.tex}
+  \end{tabular}
+\end{table*}
+
+\paragraph{Temporal decay.}
+The LAT flux peaks in the first available bin and then declines over an order of magnitude in time
+(Figure~\ref{fig:lat:decay}). We fitted the bin fluxes, evaluated at the logarithmic bin centre
+$t_c = (t_{\rm start}t_{\rm stop})^{1/2}$, with a single power law $F(t) \propto t^{-\alpha}$ and with a continuous
+broken power law,
+\begin{equation}
+  F(t) = F_b \times
+  \begin{cases}
+    (t/t_b)^{-\alpha_1}, & t < t_b,\\
+    (t/t_b)^{-\alpha_2}, & t \ge t_b.
+  \end{cases}
+  \label{eq:bpl}
+\end{equation}
+The single power law gives $\alpha = 1.80 \pm 0.07$ with $\chi^2 = 42.3$ for 25 degrees of freedom, a poor fit
+($p = 0.017$). The broken power law gives $\alpha_1 = 2.72 \pm 0.30$, $\alpha_2 = 1.22 \pm 0.18$ and
+$t_b = 175^{+31}_{-27}$~s, with $\chi^2 = 22.2$ for 23 degrees of freedom. The improvement,
+$\Delta\chi^2 = 20.1$ for two extra parameters, is significant: an $F$-test gives $p = 6\times10^{-4}$.
+Fitting the segments separately gives the same result. Inside the first GBM episode the flux decays as
+$t^{-2.37 \pm 0.20}$, and after it ends as $t^{-0.92 \pm 0.25}$. The break lies within the first GBM episode,
+$\sim$55~s before its end. Restricting the fit to bins after the second episode leaves
+$\alpha = 0.46 \pm 0.58$, which is not constraining.
+
+\begin{figure}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/lat_decay.pdf}
+  \caption{0.1--100~GeV photon flux of the Analysis~B bins at their logarithmic centres, with the best-fitting single
+  (dashed) and broken (solid) power laws of Eq.~(\ref{eq:bpl}); the dotted line marks $t_b$. Grey bands are the GBM
+  episodes.}
+  \label{fig:lat:decay}
+\end{figure}
+
+\paragraph{Energetics.}
+We integrated the energy flux over each window to obtain the observed fluence $S = F_E\,\Delta t$, and converted it
+to an isotropic-equivalent energy in the rest-frame band 0.1--100~GeV,
+\begin{equation}
+  E_{\rm iso} = \frac{4\pi d_L^2}{1+z}\, S\, k,
+  \qquad
+  k = \frac{\int_{E_1/(1+z)}^{E_2/(1+z)} E^{\gamma+1}\, dE}{\int_{E_{\min}}^{E_{\max}} E^{\gamma+1}\, dE},
+  \label{eq:eiso}
+\end{equation}
+where $E_1 = 100$~MeV and $E_2 = 100$~GeV \citep{Bloom2001}. We used $d_L = 9.69\times10^{28}$~cm, from the
+\citet{Planck2020} cosmology. For $\gamma \approx -2.2$ the correction is $k = 1.39 \pm 0.16$, where the error comes
+from the index uncertainty. The correction requires extrapolating the observed power law down to 22~MeV. Over the first
+GBM episode, $S = (4.88 \pm 0.67)\times10^{-5}$~erg~cm$^{-2}$ and
+$E_{\rm iso} = (1.8 \pm 0.3)\times10^{54}$~erg. Over the full LAT window, $S = (5.86 \pm 0.69)\times10^{-5}$~erg~cm$^{-2}$
+and $E_{\rm iso} = (2.1 \pm 0.3)\times10^{54}$~erg. The two windows overlap, so these are not additive. The
+corresponding mean isotropic luminosities in the rest frame are $3.3\times10^{52}$ and $1.0\times10^{52}$~erg~s$^{-1}$.
+
+\paragraph{High-energy photons.}
+In the Analysis~B model, 295 events have $p > 0.9$; of these, 28 are above 1~GeV and four above 10~GeV
+(Table~\ref{tab:lat:photons}). The highest-energy photon, 43.3~GeV, arrived at $T_0+82.24$~s, $0\fdg07$ from the
+burst position and at $\theta = 54\fdg9$, with $p > 0.9999$ in both analyses. It corresponds to 195~GeV in the
+rest frame. Further photons of 24.9~GeV (at 122.9~s) and 11.6~GeV (at 141.6~s) fall within the first GBM episode.
+A 14.2~GeV photon arrived at 304.1~s, during the quiescent interval between the two GBM episodes. The photon of
+5.5~GeV at 906.7~s lies $5\fdg7$ from the burst and has $p = 0.05$, so it is attributed to the background.
+
+\begin{table}
+  \centering
+  \caption{Highest-energy LAT photons associated with GRB 260924A ($p>0.9$). $E_{\rm rest}=E(1+z)$; $\rho$ is the
+  angular distance from the burst position; $p_A$ and $p_B$ are the probabilities in the Analysis~A and B models
+  (``\ldots'': outside the Analysis~A window).}
+  \label{tab:lat:photons}
+  \begin{tabular}{rrrrrcc}
+    \hline
+    $t-T_0$ & $E$ & $E_{\rm rest}$ & $\rho$ & $\theta$ & $p_A$ & $p_B$ \\
+    (s) & (GeV) & (GeV) & (deg) & (deg) & & \\
+    \hline
+    \input{tab_lat_photons.tex}
+  \end{tabular}
+\end{table}
+
+\subsubsection{Interpretation}
+\label{sec:lat:discussion}
+
+The LAT results are robust to the analysis choices we tested. Enlarging the ROI from $10^\circ$ to $15^\circ$
+changes neither the spectrum nor the flux in the common interval, so the source dominates the photon count and the
+background model has little effect. The extra $5^\circ$ annulus mostly adds background, which the fit attributes
+correctly to the diffuse components. The agreement among \texttt{TRANSIENT020E}, \texttt{TRANSIENT020} and
+\texttt{SOURCE} likewise excludes a significant contribution from residual cosmic rays, to which the transient
+classes are most exposed. The only gain of the $10^\circ$ analysis is temporal coverage of $-8$ to 70~s, which shows
+that the GeV emission was faint before $\sim$70~s.
+
+GRB 260924A shows the behaviour common to bright LAT bursts \citep{Ajello2019}. The $>100$~MeV emission rises after
+the keV--MeV emission has started, peaks during the bright prompt phase, and lasts well beyond it. The LAT
+detected the burst in every bin up to the $\theta_{\max}$ cut at 973~s, about 2.8 times $T_{90}$, while GBM has
+no reliable detection after $\sim$400~s. The isotropic-equivalent energy of $\sim2\times10^{54}$~erg in the
+0.1--100~GeV band places it at the high end of the distribution for LAT-detected bursts \citep{Ajello2019}.
+
+Two observations together point to a change of emission regime near the end of the first GBM episode. The photon
+index remains $\bar{\gamma} = -2.18 \pm 0.06$ throughout, but the decay steepens from
+$\alpha_1 \approx 2.7$ to $\alpha_2 \approx 1.2$ at $t_b \approx 175$~s. A decay as steep as
+$\alpha_1 \approx 2.7$, while the keV emission is still bright, suggests that a component tied to the prompt
+phase contributes to the early LAT flux. This could be internal emission, or an external shock still being
+energised, with the time origin placed at $T_0$ rather than at the onset of the afterglow. The late decay can be
+compared with synchrotron emission from an adiabatic forward shock \citep[e.g.][]{Kumar2009, Kumar2010}.
+With spectral index $\beta = -\bar{\gamma} - 1 = 1.18 \pm 0.06$ and the LAT band above the cooling frequency,
+$\beta = p/2$ gives an electron index $p = 2.36 \pm 0.12$. The closure relation then predicts
+\begin{equation}
+  \alpha = \frac{3p - 2}{4} = \frac{3\beta}{2} - \frac{1}{2} = 1.27 \pm 0.09,
+  \label{eq:closure}
+\end{equation}
+in agreement with $\alpha_2 = 1.22 \pm 0.18$. Placing the band between the injection and cooling frequencies instead
+gives $p = 3.36$ and $\alpha = 3\beta/2 = 1.77 \pm 0.09$, $2.7\sigma$ away from $\alpha_2$. The late LAT emission is
+therefore consistent with an adiabatic forward shock radiating above the cooling frequency, with $p \approx 2.4$.
+The steady photon index, and the absence of curvature in the log-parabola fits
+(Table~\ref{tab:lat:curv}), are consistent with the cooling frequency staying below 100~MeV throughout. A combined fit with the
+X-ray and optical afterglow (Section~\ref{sec:afterglow}) is needed to test this further.
+
+\paragraph{Caveats.}
+Several limitations affect these results. First, the burst was observed $50^\circ$--$58^\circ$ off-axis
+during its brightest phase. At those angles the effective area and energy reconstruction are less certain than
+on-axis. This mainly affects the energies of individual photons, such as the 43.3~GeV event, not the fitted indices.
+Second, we did not model energy dispersion, which can bias power-law indices slightly for spectra dominated by
+photons below 300~MeV. Third, in many short bins one of the diffuse normalizations reached a limit of its allowed
+range, which is expected when the background contributes only a few photons. Fourth, \textsc{NewMinuit} returned a
+non-zero status code for the full Analysis~B window and for the $15^\circ$ \texttt{TRANSIENT020E} fit, so their
+uncertainties should be treated with caution; their best-fit values agree with the neighbouring fits. Fifth, the GBM episode
+boundaries depend weakly on the background model, as described in Section~\ref{sec:lat:windows}; this affects only
+where the Analysis~B segments start and end. Finally, the decay indices are measured with respect to $T_0$. A
+different time origin would change $\alpha_1$ much more than $\alpha_2$. We have not derived a bulk Lorentz-factor
+limit from the 43.3~GeV photon, because that requires the target photon spectrum and variability time of the
+prompt emission.
