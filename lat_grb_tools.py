@@ -9,6 +9,7 @@ scripts that normally set those variables.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -634,6 +635,138 @@ def powerlaw2_band(flux, flux_err, index, index_err, corr, emin, emax, energies,
     sed = e ** 2 * norm * e ** g * 1.602176634e-6
     lo, med, hi = np.percentile(sed, [16, 50, 84], axis=0)
     return med, lo, hi
+
+
+MEV_TO_ERG = 1.602176634e-6
+
+
+def _unbinned(prep: Prepared, model_xml: Path):
+    from UnbinnedAnalysis import UnbinnedObs, UnbinnedAnalysis
+    sel = prep.sel
+    obs = UnbinnedObs(str(prep.evfile), str(sel.ft2), expMap=str(prep.expmap), expCube=str(prep.ltcube),
+                      irfs=sel.irf)
+    return UnbinnedAnalysis(obs, srcModel=str(model_xml), optimizer='NewMinuit')
+
+
+def _replace_spectrum(xml_text: str, source: str, spectrum_xml: str) -> str:
+    pattern = re.compile(rf'(<source name="{re.escape(source)}" type="PointSource">\s*)<spectrum.*?</spectrum>', re.S)
+    new, n = pattern.subn(lambda m: m.group(1) + spectrum_xml, xml_text, count=1)
+    if n != 1:
+        raise ValueError(f'source {source} not found in model')
+    return new
+
+
+def fit_logparabola(prep: Prepared, pl_row: dict, grb: str = 'GRB', eb: float = 1000.0,
+                    save_xml: Path | None = None) -> dict:
+    """Refit the GRB with dN/dE = N0 (E/Eb)^-(alpha + beta ln(E/Eb)), Eb fixed, starting from the power-law fit.
+
+    ts_curv = 2 (lnL_LP - lnL_PL) has one degree of freedom (beta), so its square root is the curvature
+    significance; beta may take either sign, so convex (hardening) spectra are tested too.
+    """
+    import pyLikelihood as pyLike
+    sel = prep.sel
+    g = pl_row['index']
+    norm0 = pl_row['flux'] * (g + 1) * eb ** g / (sel.emax ** (g + 1) - sel.emin ** (g + 1))
+    n0, s0 = _scaled(norm0)
+    spectrum = ('<spectrum type="LogParabola">\n' + '\n'.join([
+        _param('norm', n0, s0, 1e-4, 1e4, free=True),
+        _param('alpha', -g, 1.0, 0.0, 6.0, free=True),
+        _param('beta', 0.0, 1.0, -2.0, 3.0, free=True),
+        _param('Eb', eb, 1.0, 30, 5e5)]) + '\n  </spectrum>')
+    xml = prep.evfile.parent / 'model_logparabola.xml'
+    xml.write_text(_replace_spectrum(sel.model_xml.read_text(), grb, spectrum))
+
+    like = _unbinned(prep, xml)
+    try:
+        like.fit(verbosity=0, covar=False, optimizer='DRMNFB')
+    except Exception:
+        pass
+    opt = pyLike.NewMinuit(like.logLike)
+    like.fit(verbosity=0, covar=True, optObject=opt)
+    spec = like.model[grb].funcs['Spectrum']
+    names = ['norm', 'alpha', 'beta']
+    idx = [_free_index(like, grb, n) for n in names]
+    scales = np.array([spec.getParam(n).getScale() for n in names])
+    cov = np.array(like.covariance)[np.ix_(idx, idx)] * np.outer(scales, scales)
+    vals = [spec.getParam(n).getTrueValue() for n in names]
+    err = np.sqrt(np.diag(cov))
+    log_like = -like()
+    row = dict(approach=pl_row.get('approach'), roi=sel.roi, evclass=EVCLASS_NAME[sel.evclass],
+               tmin=prep.tmin, tmax=prep.tmax, eb=eb, lp_norm=vals[0], lp_norm_err=err[0],
+               lp_alpha=vals[1], lp_alpha_err=err[1], lp_beta=vals[2], lp_beta_err=err[2],
+               lp_cov=cov.tolist(), lp_flux=like.flux(grb, sel.emin, sel.emax),
+               lp_eflux=like.energyFlux(grb, sel.emin, sel.emax) * MEV_TO_ERG,
+               lp_log_like=log_like, lp_fit_code=opt.getRetCode(),
+               pl_index=g, pl_index_err=pl_row['index_err'], pl_ts=pl_row['ts'], pl_log_like=pl_row['log_like'])
+    row['ts_curv'] = 2 * (log_like - pl_row['log_like'])
+    row['curv_sigma'] = np.sign(row['ts_curv']) * np.sqrt(abs(row['ts_curv']))
+    a, b = vals[1], vals[2]
+    row['e_peak'] = eb * np.exp((2 - a) / (2 * b)) if b > 0 else np.nan
+    if save_xml is not None:
+        like.writeXml(str(save_xml))
+    return row
+
+
+def logparabola_band(norm, alpha, beta, cov, eb, energies, n_samples=4000, seed=1):
+    """E^2 dN/dE (erg cm^-2 s^-1) median and 68% band for a LogParabola with covariance of (norm, alpha, beta)."""
+    rng = np.random.default_rng(seed)
+    draws = rng.multivariate_normal([norm, alpha, beta], np.asarray(cov), size=n_samples)
+    draws = draws[draws[:, 0] > 0]
+    x = np.log(np.asarray(energies)[None, :] / eb)
+    e = np.asarray(energies)[None, :]
+    sed = e ** 2 * draws[:, :1] * np.exp(-(draws[:, 1:2] + draws[:, 2:3] * x) * x) * MEV_TO_ERG
+    lo, med, hi = np.percentile(sed, [16, 50, 84], axis=0)
+    return med, lo, hi
+
+
+def sed_points(prep: Prepared, fitted_xml: Path, ebins, grb: str = 'GRB', ts_min: float = 4.0) -> pd.DataFrame:
+    """E^2 dN/dE in energy bins: background and GRB index frozen at the broadband fit, GRB flux refitted per bin.
+
+    Bins with TS < ts_min get a 95% upper limit.
+    """
+    import pyLikelihood as pyLike
+    from UpperLimits import UpperLimits
+    def bin_likelihood(e1, e2):
+        # A fresh object per bin: reusing one across setEnergyRange calls left the fit stuck at stale values.
+        like = _unbinned(prep, fitted_xml)
+        for i in range(len(like.params())):
+            like.freeze(i)
+        like.thaw(like.par_index(grb, 'Integral'))
+        like.setEnergyRange(float(e1), float(e2))
+        return like
+
+    probe = _unbinned(prep, fitted_xml).model[grb].funcs['Spectrum']
+    g = probe.getParam('Index').getValue()
+    lo_lim, hi_lim = probe.getParam('LowerLimit').getValue(), probe.getParam('UpperLimit').getValue()
+    shape = lambda e: (g + 1) * e ** g / (hi_lim ** (g + 1) - lo_lim ** (g + 1))
+    start = probe.getParam('Integral').getValue()
+    integral = lambda lk: lk.model[grb].funcs['Spectrum'].getParam('Integral')
+    rows = []
+    for e1, e2 in zip(ebins[:-1], ebins[1:]):
+        ec = np.sqrt(e1 * e2)
+        like = bin_likelihood(e1, e2)
+        r = dict(e_lo=e1, e_hi=e2, e_c=ec, sed=np.nan, sed_err=np.nan, sed_ul95=np.nan, ts=np.nan)
+        try:
+            # Starting exactly at the broadband optimum lets NewMinuit stop without moving.
+            integral(like).setValue(2 * start)
+            like.syncSrcParams(grb)
+            like.fit(verbosity=0, covar=True, optObject=pyLike.NewMinuit(like.logLike))
+            par = integral(like)
+            flux, flux_err = par.getTrueValue(), par.error() * par.getScale()
+            r['npred'] = like.NpredValue(grb)
+            r['sed'] = ec ** 2 * flux * shape(ec) * MEV_TO_ERG
+            r['sed_err'] = ec ** 2 * flux_err * shape(ec) * MEV_TO_ERG
+            r['ts'] = like.Ts(grb, reoptimize=False)
+        except Exception as exc:
+            r['note'] = str(exc)
+        if not r['ts'] >= ts_min:
+            try:
+                f_ul = UpperLimits(like)[grb].compute(emin=float(e1), emax=float(e2), delta=2.71 / 2, verbosity=0)[0]
+                r['sed_ul95'] = ec ** 2 * f_ul * (g + 1) * ec ** g / (e2 ** (g + 1) - e1 ** (g + 1)) * MEV_TO_ERG
+            except Exception as exc:
+                r['note'] = f'upper limit failed: {exc}'
+        rows.append(r)
+    return pd.DataFrame(rows)
 
 
 def source_probabilities(prep: Prepared, fitted_xml: Path, outfile: Path, ra: float, dec: float,

@@ -1,0 +1,4 @@
+window,roi,tmin,tmax,set by
+A: initial period,10.0,-8.15999999999974,231.45600000000047,"first GBM episode, 10 deg good time"
+B: full LAT window,15.0,70.03825402259827,972.8122898989797,"15 deg good time, off-axis < 70 deg"
+common interval,,70.03825402259827,231.45600000000047,overlap of A and B
