@@ -780,7 +780,7 @@ if rank == 0:  # Only one process does the analysis
 
     bic = astropy.stats.bayesian_info_criterion(lnZ, n_params, num_obs)
     logger.info(
-        f"lnZ={lnZ:.4f} lnZErr={lnZErr:.4f}, n_params={n_params:.4f}, num_obs={num_obs}, BIC={bic:.4f}"
+        f"logdet={logdet:.4f}, lnZ={lnZ:.4f} lnZErr={lnZErr:.4f}, n_params={n_params:.4f}, num_obs={num_obs}, BIC={bic:.4f}"
     )
 
     # Get the best-fit parameters (highest likelihood point)

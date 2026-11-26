@@ -200,10 +200,15 @@ def gbm_ctime_lightcurve(path: str | Path, trigtime: float, emin_kev: float, ema
 
 def rank_gbm_detectors(files: dict[str, Path], trigtime: float, emin_kev: float, emax_kev: float,
                        src_window: tuple[float, float], bkg_windows: list[tuple[float, float]],
-                       dt: float = 1.024, order: int = 1) -> pd.DataFrame:
+                       dt: float = 1.024, order: int = 1,
+                       tmin: float | None = None, tmax: float | None = None) -> pd.DataFrame:
+    if tmin is None:
+        tmin = min(a for a, _ in bkg_windows)
+    if tmax is None:
+        tmax = max(b for _, b in bkg_windows)
     rows = []
     for det, path in files.items():
-        lc = gbm_ctime_lightcurve(path, trigtime, emin_kev, emax_kev, -1000., 1000., dt)
+        lc = gbm_ctime_lightcurve(path, trigtime, emin_kev, emax_kev, tmin, tmax, dt)
         bkg = fit_background(lc, bkg_windows, order)
         m = (lc.t_lo >= src_window[0]) & (lc.t_hi <= src_window[1])
         n = lc.counts[m].sum()

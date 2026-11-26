@@ -39,7 +39,8 @@ Example:
 
     python fit_lightcurve.py data/GRB260924A.csv --model broken --common \
         --spectrum
-        -> also writes the model spectrum at six log-spaced times from 1e3 s to 1e6 s
+        -> also writes the model spectrum at six log-spaced times from 1e3 s to 1e6 s,
+           fit with a broken power law (radio–optical and optical–X-ray)
 
     python fit_lightcurve.py data/GRB260924A.csv --model broken \
         --start-time 1e3 --end-time 1e6
@@ -73,6 +74,11 @@ LN10 = np.log(10.0)
 
 # Six observer times, equally spaced in log t from 1e3 s to 1e6 s.
 SPECTRUM_EPOCHS_S = np.logspace(3, 6, 6)
+
+# Radio includes mm and sub-mm. X-ray starts above the UV.
+# NIR, optical, and UV lie between and hold the spectral break.
+SPECTRUM_RADIO_HZ = 1.0e13
+SPECTRUM_XRAY_HZ = 1.0e16
 
 
 # ============================================================
@@ -1409,7 +1415,7 @@ def plot_common_results(data, fits, model, bands, output=None):
         2,
         1,
         sharex=True,
-        figsize=(10, 7),
+        figsize=(5, 3.5),
         gridspec_kw={"height_ratios": [3, 1], "hspace": 0.0},
     )
 
@@ -1649,7 +1655,7 @@ def plot_results(data, fits, model, bands, output=None):
     # each other.
     # --------------------------------------------------------
 
-    fig = plt.figure(figsize=(10, 3.8 * len(bands)))
+    fig = plt.figure(figsize=(5, 1.9 * len(bands)))
 
     outer = fig.add_gridspec(
         len(bands),
@@ -1885,7 +1891,7 @@ def plot_all_fitted_bands(data, fits, model, bands, output=None):
     t_lo = float(times.min())
     t_hi = float(times.max())
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(5, 3))
     colors = _band_colors(bands)
     legend_handles = []
     slope_labels = []
@@ -1910,7 +1916,9 @@ def plot_all_fitted_bands(data, fits, model, bands, output=None):
         ]
 
         if len(detections) > 0:
-            scaled_fluxes.append(detections["Fluxes"].to_numpy(dtype=float) * multiplier)
+            scaled_fluxes.append(
+                detections["Fluxes"].to_numpy(dtype=float) * multiplier
+            )
 
             ax.errorbar(
                 detections["Times"],
@@ -2236,6 +2244,18 @@ def spectrum_from_fit(data, fits, epochs=None):
     return spectrum.reset_index(drop=True)
 
 
+def _spectrum_regimes(frequency):
+    """radio, optical, or xray for each frequency."""
+
+    frequency = np.asarray(frequency, dtype=float)
+    regime = np.full(frequency.shape, "optical", dtype=object)
+
+    regime[frequency < SPECTRUM_RADIO_HZ] = "radio"
+    regime[frequency > SPECTRUM_XRAY_HZ] = "xray"
+
+    return regime
+
+
 def fit_spectrum_powerlaw(frequency, flux):
     """
     Single power law F_ν ∝ ν^{-β}.
@@ -2264,6 +2284,189 @@ def fit_spectrum_powerlaw(frequency, flux):
     slope, log_f_1hz = np.polyfit(log_nu, np.log10(flux), 1)
 
     return -float(slope), float(log_f_1hz)
+
+
+def _spectrum_leg(frequency, flux, name):
+    """One power-law leg drawn across the frequencies that were fit."""
+
+    fit = fit_spectrum_powerlaw(frequency, flux)
+
+    if fit is None:
+        return None
+
+    beta, log_f_1hz = fit
+
+    return {
+        "name": name,
+        "beta": beta,
+        "nu_ref": 1.0,
+        "log_f_ref": log_f_1hz,
+        "nu_min": float(np.min(frequency)),
+        "nu_max": float(np.max(frequency)),
+    }
+
+
+def _anchored_beta(frequency, flux, nu_b, log_f_b):
+    """
+    Spectral index of a power law forced through (nu_b, F_b).
+
+    log10 F = log_f_b - β log10(ν / ν_b). None when every point
+    sits on the break, so the slope is unconstrained.
+    """
+
+    x = np.log10(np.asarray(frequency, dtype=float) / nu_b)
+    weight = float(np.sum(x * x))
+
+    if weight <= 0:
+        return None
+
+    residual = log_f_b - np.log10(np.asarray(flux, dtype=float))
+
+    return float(np.sum(x * residual) / weight)
+
+
+def fit_spectrum(frequency, flux):
+    """
+    Broken power law, break in the optical.
+
+    The low-frequency leg runs from radio through optical,
+    F_ν ∝ ν^{-β_ro}. The high-frequency leg runs from optical
+    through X-ray, F_ν ∝ ν^{-β_ox}. The two meet at the geometric
+    mean of the optical points. Each slope is fit to every point
+    on that leg, including the whole optical band.
+
+    A missing radio band drops the radio–optical leg. A missing
+    X-ray band drops the optical–X-ray leg. The remaining leg is
+    a single power law. With neither outer band, the optical
+    points alone are fit with a single power law.
+
+    Returns a dict with break_Hz (or None) and legs. Each leg has
+    name, beta, nu_ref, log_f_ref, nu_min, and nu_max, and
+    log10 F = log_f_ref - beta * log10(ν / nu_ref).
+    None when no leg has two distinct frequencies.
+    """
+
+    frequency = np.asarray(frequency, dtype=float)
+    flux = np.asarray(flux, dtype=float)
+
+    good = np.isfinite(frequency) & np.isfinite(flux) & (frequency > 0) & (flux > 0)
+
+    frequency = frequency[good]
+    flux = flux[good]
+
+    if len(frequency) < 2:
+        return None
+
+    regime = _spectrum_regimes(frequency)
+    radio = regime == "radio"
+    optical = regime == "optical"
+    xray = regime == "xray"
+
+    has_radio = bool(np.any(radio))
+    has_optical = bool(np.any(optical))
+    has_xray = bool(np.any(xray))
+
+    if has_radio and has_optical and has_xray:
+        nu_b = float(10 ** np.mean(np.log10(frequency[optical])))
+        log_f_b = float(np.mean(np.log10(flux[optical])))
+        beta_ro = _anchored_beta(
+            frequency[radio | optical], flux[radio | optical], nu_b, log_f_b
+        )
+        beta_ox = _anchored_beta(
+            frequency[optical | xray], flux[optical | xray], nu_b, log_f_b
+        )
+
+        if beta_ro is not None and beta_ox is not None:
+            return {
+                "break_Hz": nu_b,
+                "legs": [
+                    {
+                        "name": "radio-optical",
+                        "beta": beta_ro,
+                        "nu_ref": nu_b,
+                        "log_f_ref": log_f_b,
+                        "nu_min": float(frequency[radio | optical].min()),
+                        "nu_max": nu_b,
+                    },
+                    {
+                        "name": "optical-X-ray",
+                        "beta": beta_ox,
+                        "nu_ref": nu_b,
+                        "log_f_ref": log_f_b,
+                        "nu_min": nu_b,
+                        "nu_max": float(frequency[optical | xray].max()),
+                    },
+                ],
+            }
+
+    legs = []
+
+    if has_radio and not has_xray:
+        mask = radio | optical
+        name = "radio-optical" if has_optical else "radio"
+        leg = _spectrum_leg(frequency[mask], flux[mask], name)
+
+        if leg is not None:
+            legs.append(leg)
+
+    elif has_xray and not has_radio:
+        mask = optical | xray
+        name = "optical-X-ray" if has_optical else "X-ray"
+        leg = _spectrum_leg(frequency[mask], flux[mask], name)
+
+        if leg is not None:
+            legs.append(leg)
+
+    elif has_radio and has_xray:
+        for mask, name in ((radio, "radio"), (xray, "X-ray")):
+            leg = _spectrum_leg(frequency[mask], flux[mask], name)
+
+            if leg is not None:
+                legs.append(leg)
+
+    else:
+        leg = _spectrum_leg(frequency[optical], flux[optical], "optical")
+
+        if leg is not None:
+            legs.append(leg)
+
+    if not legs:
+        return None
+
+    return {"break_Hz": None, "legs": legs}
+
+
+def _spectrum_leg_curve(leg, pad_low, pad_high):
+    """Frequencies and flux along one fitted leg."""
+
+    log_lo = np.log10(leg["nu_min"])
+    log_hi = np.log10(leg["nu_max"])
+    span = max(log_hi - log_lo, 0.3)
+
+    if pad_low:
+        log_lo = log_lo - 0.03 * span
+
+    if pad_high:
+        log_hi = log_hi + 0.03 * span
+
+    nu_line = np.logspace(log_lo, log_hi, 64)
+    log_f = leg["log_f_ref"] - leg["beta"] * np.log10(nu_line / leg["nu_ref"])
+
+    return nu_line, 10**log_f
+
+
+def _spectrum_beta_label(leg):
+    """Slope label for one spectrum leg."""
+
+    beta = leg["beta"]
+
+    if leg["name"] == "radio-optical":
+        return rf"$\beta_{{\rm ro}}={beta:.2f}$"
+
+    if leg["name"] == "optical-X-ray":
+        return rf"$\beta_{{\rm ox}}={beta:.2f}$"
+
+    return rf"$\beta={beta:.2f}$"
 
 
 def _spectrum_curve(frequency, flux):
@@ -2314,14 +2517,15 @@ def plot_model_spectrum(spectrum, output=None):
     """
     One plot: every epoch is a different color.
 
-    Each epoch is fit with a single power law F_ν ∝ ν^{-β}, drawn
-    through the model points, and β is written on the curve.
+    Each epoch is fit with a broken power law: radio through optical
+    and optical through X-ray. A missing radio or X-ray band drops
+    that leg. β is written on each leg.
     """
 
     epochs = list(dict.fromkeys(spectrum["epoch_s"].tolist()))
     colors = [f"C{i % 10}" for i in range(len(epochs))]
 
-    fig, ax = plt.subplots(figsize=(8, 5.5))
+    fig, ax = plt.subplots(figsize=(4, 2.75))
 
     fitted_flux = []
 
@@ -2340,7 +2544,7 @@ def plot_model_spectrum(spectrum, output=None):
         if extrapolated:
             label = label + " (extrap.)"
 
-        fit = fit_spectrum_powerlaw(nu, flux)
+        fit = fit_spectrum(nu, flux)
         marker_label = label if fit is None else None
 
         if len(model_piece):
@@ -2388,47 +2592,41 @@ def plot_model_spectrum(spectrum, output=None):
         if fit is None:
             continue
 
-        beta, log_f_1hz = fit
+        for i_leg, leg in enumerate(fit["legs"]):
+            pad_low = leg["nu_min"] <= nu.min() * (1 + 1e-6)
+            pad_high = leg["nu_max"] >= nu.max() * (1 - 1e-6)
+            nu_line, flux_line = _spectrum_leg_curve(leg, pad_low, pad_high)
 
-        span = np.log10(nu.max()) - np.log10(nu.min())
-        pad = 0.03 * max(span, 0.3)
+            fitted_flux.append(flux_line)
 
-        nu_line = np.logspace(
-            np.log10(nu.min()) - pad,
-            np.log10(nu.max()) + pad,
-            64,
-        )
+            ax.plot(
+                nu_line,
+                flux_line,
+                "-",
+                color=color,
+                linewidth=1.8,
+                label=label if i_leg == 0 else None,
+                zorder=2,
+            )
 
-        flux_line = 10 ** (log_f_1hz - beta * np.log10(nu_line))
+            nu_mid = np.sqrt(leg["nu_min"] * leg["nu_max"])
+            f_mid = 10 ** (
+                leg["log_f_ref"] - leg["beta"] * np.log10(nu_mid / leg["nu_ref"])
+            )
 
-        fitted_flux.append(flux_line)
-
-        ax.plot(
-            nu_line,
-            flux_line,
-            "-",
-            color=color,
-            linewidth=1.8,
-            label=label,
-            zorder=2,
-        )
-
-        nu_mid = np.sqrt(nu.min() * nu.max())
-        f_mid = 10 ** (log_f_1hz - beta * np.log10(nu_mid))
-
-        ax.annotate(
-            rf"$\beta={beta:.2f}$",
-            xy=(nu_mid, f_mid),
-            xytext=(0, 6),
-            textcoords="offset points",
-            ha="center",
-            va="bottom",
-            color=color,
-            fontsize=11,
-            annotation_clip=False,
-            clip_on=False,
-            zorder=5,
-        )
+            ax.annotate(
+                _spectrum_beta_label(leg),
+                xy=(nu_mid, f_mid),
+                xytext=(0, 6),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                color=color,
+                fontsize=11,
+                annotation_clip=False,
+                clip_on=False,
+                zorder=5,
+            )
 
     nu_all = spectrum["frequency_Hz"].to_numpy()
 
@@ -2505,10 +2703,14 @@ def print_spectrum(spectrum):
         print(f"{epoch:.6g} s{note}")
 
         nu, flux = _spectrum_curve(piece["frequency_Hz"], piece["flux_mJy"])
-        fit = fit_spectrum_powerlaw(nu, flux)
+        fit = fit_spectrum(nu, flux)
 
         if fit is not None:
-            print(f"  beta = {fit[0]:.3f}    F_nu ∝ nu^(-beta)")
+            if fit["break_Hz"] is not None:
+                print(f"  break = {fit['break_Hz']:.3g} Hz")
+
+            for leg in fit["legs"]:
+                print(f"  {leg['name']}: beta = {leg['beta']:.3f}    F_nu ∝ nu^(-beta)")
 
         for row in piece.itertuples(index=False):
             origin = "  (measured)" if row.measured else ""
@@ -2608,7 +2810,9 @@ def main():
         help=(
             "Evaluate the fitted flux from the lowest to the highest "
             "frequency in the data at six times spaced logarithmically "
-            "from 1e3 s to 1e6 s, and write a spectrum plot and table."
+            "from 1e3 s to 1e6 s. Fit a broken power law, radio through "
+            "optical and optical through X-ray, and write a spectrum "
+            "plot and table. A leg is omitted when its outer band is missing."
         ),
     )
 
