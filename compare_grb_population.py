@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Compare GRB 260924A with the high-energy sample and the Fermi-GBM population.
+"""Compare one GRB with the high-energy sample and the Fermi-GBM population.
+
+Pass ``--grb 260924A``. The redshift is ``--redshift``, or the value in the
+high-energy compilation when that burst is listed there. The GBM bcat is
+``data/GRB<name>/gbm/glg_bcat_all_*.fit`` and the time-resolved Band table is
+``results/GRB<name>/band_joint_gbm_bat_xrt.csv``. Override either with
+``--bcat`` and ``--band-csv``. Figures go to ``results/GRB<name>/population``.
+``--theta`` is the jet half-opening angle in degrees; without it the Frail
+and Ghirlanda panels are skipped. With no arguments the script runs
+GRB 260924A at z = 3.51 and theta = 1.7 deg.
 
 The high-energy sample is the redshift-known compilation in
 ``high_energy_grb.csv`` (redshift, T90, isotropic energy in units of 10^52 erg,
@@ -10,25 +19,30 @@ caches it under ``data/catalogs/``.
 
 Every pair of attributes is one scatter plot. Where the catalog separates
 long and short bursts, only the long population is drawn and the power law
-is fit to those bursts. GRB 260924A is the black star, and the five other
+is fit to those bursts. The target burst is the black star, and the five other
 bursts with the largest isotropic energies are marked in colour.
 
 The same long-burst samples are also drawn as histograms, with this burst
 marked on each axis. Pass ``--histograms-only`` to write those figures from
-the cached catalogs and ``grb260924a_parameters.csv`` without refitting.
+the cached catalogs and the parameter table without refitting.
 
-GRB 260924A uses z = 3.51. T90, the 10-1000 keV fluence, and the 1024 ms peak
-photon flux come from the GBM bcat file, which is the same pipeline that fills
-the catalog. T05 is measured on the same 50-300 keV cumulative fluence as T90
-and T50: it is the time between the 47.5% and 52.5% points. Neither catalog
-tabulates T05, so it is reported for this burst and is not a population axis.
-The isotropic energy integrates the time-resolved joint
-GBM+BAT(+XRT) Band fits over the observer-frame band that corresponds to
-10 keV-10 MeV in the rest frame (H0 = 67.7, Om = 0.3, flat). The peak energy
-is the nu F_nu peak of that time-integrated model. Alpha and beta are the
-fluence-weighted means of the same fits. Uncertainties on those derived
-quantities are the 16th and 84th percentiles of a split-normal draw of the
-Band parameters.
+The jet-angle panel places this burst on the Frail relation. The comparison
+samples are Frail et al. (2001) Table 1 and Wang et al. (2018) Table 5,
+read from the CSV files under ``data/catalogs/``. The Ghirlanda panel uses
+that same Wang sample: collimation-corrected energy from Table 5, and
+redshift and peak energy from Table 2.
+
+T90, the 10-1000 keV fluence, and the 1024 ms peak photon flux come from the
+GBM bcat file, which is the same pipeline that fills the catalog. T05 is
+measured on the same 50-300 keV cumulative fluence as T90 and T50: it is the
+time between the 47.5% and 52.5% points. Neither catalog tabulates T05, so it
+is reported for this burst and is not a population axis. The isotropic energy
+integrates the time-resolved joint GBM+BAT(+XRT) Band fits over the
+observer-frame band that corresponds to 10 keV-10 MeV in the rest frame
+(H0 = 67.7, Om = 0.3, flat). The peak energy is the nu F_nu peak of that
+time-integrated model. Alpha and beta are the fluence-weighted means of the
+same fits. Uncertainties on those derived quantities are the 16th and 84th
+percentiles of a split-normal draw of the Band parameters.
 """
 
 from __future__ import annotations
@@ -37,8 +51,10 @@ import argparse
 import itertools
 import urllib.parse
 import urllib.request
+import zlib
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import matplotlib
 
@@ -52,19 +68,19 @@ from astropy.io.votable import parse as parse_votable
 import astropy.units as u
 
 ROOT = Path(__file__).resolve().parent
-GRB_NAME = "260924A"
-TRIGGER = "bn260924051"
-REDSHIFT = 3.51
+# Running the script with no arguments repeats the GRB 260924A comparison.
+DEFAULT_GRB = "260924A"
+DEFAULT_REDSHIFT = 3.51
+DEFAULT_THETA_DEG = 1.7
 H0 = 67.7
 OM0 = 0.3
 HIGH_ENERGY_CSV = Path("/mnt/nas3_czti/grb_catalog_data/high_energy_grb.csv")
-BCAT = ROOT / "data/GRB260924A/gbm/glg_bcat_all_bn260924051_v01.fit"
-BAND_CSV = ROOT / "results/GRB260924A/band_joint_gbm_bat_xrt.csv"
 CACHE = ROOT / "data/catalogs/fermigbrst_population.csv"
 PFLX_CACHE = ROOT / "data/catalogs/fermigbrst_pflx.csv"
 FRAIL_TABLE = ROOT / "data/catalogs/frail2001_table1.csv"
-THETA_J_DEG = 1.7
-OUTPUT = ROOT / "results/GRB260924A/population"
+WANG_TABLE = ROOT / "data/catalogs/wang2018_table5.csv"
+WANG_COLOR = "#0f766e"
+WANG_EDGE = "#115e59"
 TAP = "https://heasarc.gsfc.nasa.gov/xamin/vo/tap/sync"
 N_TOP = 5
 
@@ -130,6 +146,80 @@ def _norm_name(value):
         if text.startswith(prefix):
             text = text[len(prefix):]
     return text
+
+
+def _burst_rows(frame, grb_name):
+    """Catalog rows for this burst, including the numeric GBM trigger on that date.
+
+    Another burst on the same day, such as 260924B beside 260924A, is kept.
+    """
+    key = _norm_name(grb_name)
+    norm = frame["norm"].astype(str)
+    trigger = frame["trigger_norm"].astype(str)
+    mask = (norm == key) | (trigger == key)
+    if len(key) >= 6 and key[:6].isdigit():
+        date = key[:6]
+        letter = key[6:].upper()
+        on_date = norm.str.startswith(date) | trigger.str.startswith(date)
+        if letter:
+            other = (
+                norm.str.startswith(date)
+                & ~norm.str.startswith(date + letter)
+                & norm.str.slice(6, 7).str.fullmatch(r"[A-Z]", na=False)
+            )
+            mask = mask | (on_date & ~other)
+        else:
+            mask = mask | on_date
+    return mask
+
+
+def _draw_seed(grb_name):
+    """Stable Monte Carlo seed. The first six digits are the GBM date."""
+    key = _norm_name(grb_name)
+    if len(key) >= 6 and key[:6].isdigit():
+        return int(key[:6])
+    return zlib.crc32(key.encode()) % 1_000_000
+
+
+def resolve_target(args):
+    """Paths and labels for the burst named by --grb."""
+    name = _norm_name(args.grb)
+    if not name:
+        raise SystemExit("Pass a GRB name with --grb, for example 221009A.")
+    bcat = args.bcat
+    if bcat is None:
+        found = sorted((ROOT / f"data/GRB{name}/gbm").glob("glg_bcat_all_*.fit"))
+        bcat = found[-1] if found else None
+    band = args.band_csv or (ROOT / f"results/GRB{name}/band_joint_gbm_bat_xrt.csv")
+    theta = args.theta
+    if theta is None and name == DEFAULT_GRB:
+        theta = DEFAULT_THETA_DEG
+    return SimpleNamespace(
+        name=name,
+        label=f"GRB {name}",
+        bcat=None if bcat is None else Path(bcat),
+        band=Path(band),
+        output_dir=Path(args.output_dir) if args.output_dir else ROOT / f"results/GRB{name}/population",
+        parameter_csv=f"grb{name.lower()}_parameters.csv",
+        theta=theta,
+        seed=_draw_seed(name),
+    )
+
+
+def resolve_redshift(redshift, name, sample):
+    """Command-line redshift, else the high-energy compilation, else the built-in default."""
+    if redshift is not None:
+        return float(redshift)
+    if sample is not None and "GRB" in sample.columns:
+        hit = sample[sample["GRB"].map(_norm_name) == name]
+        known = hit["z"][pd.to_numeric(hit["z"], errors="coerce") > 0]
+        if len(known):
+            return float(known.iloc[0])
+    if name == DEFAULT_GRB:
+        return DEFAULT_REDSHIFT
+    raise SystemExit(
+        f"GRB {name} has no redshift in the high-energy compilation. Pass --redshift."
+    )
 
 
 def download_gbm_catalog(cache_path, refresh=False):
@@ -266,7 +356,7 @@ def _fluence_crossing(time, cumulative, level):
     return float(time[index - 1] + fraction * (time[index] - time[index - 1]))
 
 
-def cumulative_durations(path, n_draws=800, seed=260924):
+def cumulative_durations(path, n_draws=800, seed=1):
     """T90, T50, and T05 from the bcat 50-300 keV cumulative photon fluence.
 
     The curve is the background-subtracted fluence stored for the duration
@@ -362,15 +452,15 @@ def _band_photons(K, alpha, xp, beta, energy):
     return photons, valid
 
 
-def this_grb_parameters(bcat_path, band_path, n_draws=800, seed=260924):
+def this_grb_parameters(bcat_path, band_path, redshift, n_draws=800, seed=1):
     """T90, fluence, and flux from the bcat; Eiso and spectral shape from the Band fits."""
     measured = read_bcat(bcat_path)
     durations = cumulative_durations(bcat_path, n_draws=n_draws, seed=seed)
     bands = pd.read_csv(band_path)
     energy = np.logspace(np.log10(1.0), np.log10(2.0e4), 4000)
     in_gbm = (energy >= 10.0) & (energy <= 1000.0)
-    rest_emin = REST_EMIN_KEV / (1.0 + REDSHIFT)
-    rest_emax = REST_EMAX_KEV / (1.0 + REDSHIFT)
+    rest_emin = REST_EMIN_KEV / (1.0 + redshift)
+    rest_emax = REST_EMAX_KEV / (1.0 + redshift)
     in_bol = (energy >= rest_emin) & (energy <= rest_emax)
 
     def spectrum(K, alpha, xp, beta):
@@ -398,8 +488,8 @@ def this_grb_parameters(bcat_path, band_path, n_draws=800, seed=260924):
     beta_w = float(np.sum(s10_bins * beta) / np.sum(s10_bins))
 
     cosmo = FlatLambdaCDM(H0=H0, Om0=OM0)
-    d_l = cosmo.luminosity_distance(REDSHIFT).to(u.cm).value
-    eiso_erg = 4.0 * np.pi * d_l ** 2 * s_bol / (1.0 + REDSHIFT)
+    d_l = cosmo.luminosity_distance(redshift).to(u.cm).value
+    eiso_erg = 4.0 * np.pi * d_l ** 2 * s_bol / (1.0 + redshift)
 
     rng = np.random.default_rng(seed)
     n_bins = len(bands)
@@ -422,7 +512,7 @@ def this_grb_parameters(bcat_path, band_path, n_draws=800, seed=260924):
         fluence = (density * dt[:, None]).sum(axis=0)
         ep_draws[draw] = energy[np.argmax(energy * fluence)]
         s_bol_draw = float(_trapz(fluence[in_bol], energy[in_bol]))
-        eiso_draws[draw] = 4.0 * np.pi * d_l ** 2 * s_bol_draw / (1.0 + REDSHIFT)
+        eiso_draws[draw] = 4.0 * np.pi * d_l ** 2 * s_bol_draw / (1.0 + redshift)
         s10 = np.array([float(_trapz(density[i, in_gbm], energy[in_gbm])) * dt[i] for i in range(n_bins)])
         weight = np.clip(s10, 0, None)
         if weight.sum() <= 0:
@@ -445,11 +535,11 @@ def this_grb_parameters(bcat_path, band_path, n_draws=800, seed=260924):
     n_valid = int(np.isfinite(eiso_draws).sum())
 
     values = {
-        "z": (REDSHIFT, 0.0, 0.0),
+        "z": (redshift, 0.0, 0.0),
         "T90": (measured["T90"], measured["T90_err"], measured["T90_err"]),
         "T05": durations["T05"][:3],
         "Eiso": (eiso_erg / 1.0e52, eiso_lo / 1.0e52, eiso_hi / 1.0e52),
-        "Ep": (ep_obs * (1.0 + REDSHIFT), ep_lo * (1.0 + REDSHIFT), ep_hi * (1.0 + REDSHIFT)),
+        "Ep": (ep_obs * (1.0 + redshift), ep_lo * (1.0 + redshift), ep_hi * (1.0 + redshift)),
         "fluence": (measured["fluence"], measured["fluence_err"], measured["fluence_err"]),
         "peak_flux": (measured["peak_flux"], measured["peak_flux_err"], measured["peak_flux_err"]),
         "Epeak": (ep_obs, ep_lo, ep_hi),
@@ -587,12 +677,49 @@ def _draw_relation(ax, grid, x_line, intercept, slope, sigma, ylog, band_color, 
     ax.plot(x_line, y_line, color=line_color, lw=1.4, zorder=2, label=line_label)
 
 
+def _fit_slope(design, ordinate):
+    """Ordinary least-squares slope and its standard error.
+
+    The last column of design is the term whose coefficient is the slope.
+    The uncertainty is the residual-scaled standard error of that coefficient.
+    """
+    beta, sse, rank, _ = np.linalg.lstsq(design, ordinate, rcond=None)
+    n_points, n_parameters = design.shape
+    variance = np.nan
+    if sse.size and rank == n_parameters and n_points > n_parameters:
+        sigma2 = float(sse[0]) / (n_points - n_parameters)
+        try:
+            covariance = sigma2 * np.linalg.inv(design.T @ design)
+            variance = float(covariance[-1, -1])
+        except np.linalg.LinAlgError:
+            variance = np.nan
+    error = float(np.sqrt(variance)) if np.isfinite(variance) and variance > 0 else np.nan
+    return beta, error
+
+
+def _fit_label(prefix, slope, slope_err, power):
+    """Legend entry giving the fitted index and its uncertainty.
+
+    The index is the slope in the coordinates of the fit: log10 of an axis
+    when that axis is logarithmic, and the plotted value when it is linear.
+    """
+    if np.isfinite(slope_err) and slope_err > 0:
+        places = int(np.clip(np.ceil(-np.log10(abs(slope_err))) + 1, 0, 4))
+        index = rf"${slope:.{places}f} \pm {slope_err:.{places}f}$"
+    else:
+        index = rf"${slope:.2f}$"
+    kind = "power law" if power else "fit"
+    return f"{prefix}{kind}, index {index}"
+
+
 def add_relation_fit(ax, x, y, xlog, ylog, classes=None):
     """Power laws across the full axes, with 1, 2 and 3 sigma bands.
 
     When both a long and a short class are present, the two lines share one
     index and have separate normalizations. Each band is that class's own
-    residual scatter. Otherwise one line is fit to every point.
+    residual scatter.     Otherwise one line is fit to every point. The legend gives the fitted
+    index and its standard error for every line, including fits that are
+    not a power law because one axis is linear.
     """
     x = np.asarray(x, float)
     y = np.asarray(y, float)
@@ -617,22 +744,23 @@ def add_relation_fit(ax, x, y, xlog, ylog, classes=None):
     if shared:
         design = np.column_stack([long.astype(float), short.astype(float), abscissa])
         use = long | short
-        intercept_long, intercept_short, slope = np.linalg.lstsq(design[use], ordinate[use], rcond=None)[0]
+        beta, slope_err = _fit_slope(design[use], ordinate[use])
+        intercept_long, intercept_short, slope = (float(value) for value in beta)
         groups = (
-            ("long", float(intercept_long), long),
-            ("short", float(intercept_short), short),
+            ("long", intercept_long, long),
+            ("short", intercept_short, short),
         )
-        slope = float(slope)
     else:
-        slope, intercept = np.polyfit(abscissa, ordinate, 1)
-        groups = (("all", float(intercept), np.ones(len(abscissa), dtype=bool)),)
-        slope = float(slope)
+        design = np.column_stack([np.ones(len(abscissa)), abscissa])
+        beta, slope_err = _fit_slope(design, ordinate)
+        intercept, slope = (float(value) for value in beta)
+        groups = (("all", intercept, np.ones(len(abscissa), dtype=bool)),)
     (xmin, xmax), (ymin, ymax) = _lock_view(ax)
     if xlog and (xmin <= 0 or xmax <= 0):
         return
     grid = np.linspace(np.log10(xmin), np.log10(xmax), 400) if xlog else np.linspace(xmin, xmax, 400)
     x_line = 10 ** grid if xlog else grid
-    kind = "power law" if xlog and ylog else "fit"
+    power = xlog and ylog
     for name, intercept, mask in groups:
         residual = ordinate[mask] - (intercept + slope * abscissa[mask])
         sigma = float(np.std(residual, ddof=2))
@@ -640,23 +768,23 @@ def add_relation_fit(ax, x, y, xlog, ylog, classes=None):
             continue
         if name == "all":
             band_color = line_color = "#1f4e79"
-            line_label = kind
+            line_label = _fit_label("", slope, slope_err, power)
             label_bands = True
         else:
             band_color = CLASS_STYLE[name]["band"]
             line_color = CLASS_STYLE[name]["line"]
-            line_label = f"{CLASS_STYLE[name]['label']} {kind}"
+            line_label = _fit_label(f"{CLASS_STYLE[name]['label']} ", slope, slope_err, power)
             label_bands = False
         _draw_relation(ax, grid, x_line, intercept, slope, sigma, ylog, band_color, line_color, line_label, label_bands)
     if shared:
-        print(f"  shared index {slope:.3f}: long {int(long.sum())}, short {int(short.sum())}")
+        print(f"  shared index {slope:.3f} ± {slope_err:.3f}: long {int(long.sum())}, short {int(short.sum())}")
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
     ax.set_autoscalex_on(False)
     ax.set_autoscaley_on(False)
 
 
-def plot_pair(path, xlabel_key, ylabel_key, population, highlights, this_grb, population_label):
+def plot_pair(path, xlabel_key, ylabel_key, population, highlights, this_grb, population_label, star_label):
     x, xlo, xhi = _population_errors(population, xlabel_key)
     y, ylo, yhi = _population_errors(population, ylabel_key)
     keep = np.isfinite(x) & np.isfinite(y) & (x != 0) & (y != 0)
@@ -737,7 +865,7 @@ def plot_pair(path, xlabel_key, ylabel_key, population, highlights, this_grb, po
             item["values"], TOP_MARKERS[index], TOP_COLORS[index], 58,
             item["label"], 4,
         )
-    draw_point(this_grb, "*", "black", 220, "GRB 260924A", 6)
+    draw_point(this_grb, "*", "black", 220, star_label, 6)
 
     if xlabel_key in LOG_ATTRS:
         ax.set_xscale("log")
@@ -894,7 +1022,7 @@ def luminosity_from_peak_flux(alpha, epeak, beta, flux_10_1000, redshift, distan
     return 4.0 * np.pi * distance_cm ** 2 * flux_10_1000 * ratio
 
 
-def this_burst_peak_luminosity(n_draws=800, seed=260924):
+def this_burst_peak_luminosity(bcat_path, band_path, redshift, n_draws=800, seed=1):
     """1.024 s peak luminosity from the bcat photon flux and the joint Band fit.
 
     The GBM catalog has no peak-flux spectrum for this burst. The 1024 ms peak
@@ -902,11 +1030,11 @@ def this_burst_peak_luminosity(n_draws=800, seed=260924):
     Band interval. That interval's shape converts the photon flux to the
     rest-frame 10 keV-10 MeV energy flux.
     """
-    header = fits.getheader(BCAT, 0)
+    header = fits.getheader(bcat_path, 0)
     photon_flux = float(header["PFLX"])
     photon_flux_err = float(header["PFLX_ERR"])
     peak_time = float(header["PFLX_BEG"]) + 0.5 * float(header["PFLX_INT"])
-    bands = pd.read_csv(BAND_CSV)
+    bands = pd.read_csv(band_path)
     row = bands[(bands["t_start"] <= peak_time) & (bands["t_end"] >= peak_time)].iloc[0]
     energy = np.logspace(np.log10(0.2), np.log10(2.0e4), 4000)
     photons, valid = _band_photons([row["K"]], [row["alpha"]], [row["xp"]], [row["beta"]], energy)
@@ -915,8 +1043,8 @@ def this_burst_peak_luminosity(n_draws=800, seed=260924):
     observed = (energy >= 10.0) & (energy <= 1000.0)
     model_photon_flux = float(_trapz(photons[0, observed], energy[observed]))
     scale = photon_flux / model_photon_flux
-    distance = FlatLambdaCDM(H0=H0, Om0=OM0).luminosity_distance(REDSHIFT).to(u.cm).value
-    rest = (energy >= REST_EMIN_KEV / (1.0 + REDSHIFT)) & (energy <= REST_EMAX_KEV / (1.0 + REDSHIFT))
+    distance = FlatLambdaCDM(H0=H0, Om0=OM0).luminosity_distance(redshift).to(u.cm).value
+    rest = (energy >= REST_EMIN_KEV / (1.0 + redshift)) & (energy <= REST_EMAX_KEV / (1.0 + redshift))
     energy_flux = float(_trapz(photons[0, rest] * energy[rest], energy[rest]) * KEV_TO_ERG) * scale
     luminosity = 4.0 * np.pi * distance ** 2 * energy_flux
 
@@ -945,13 +1073,13 @@ def this_burst_peak_luminosity(n_draws=800, seed=260924):
     if len(sample) < 100:
         raise RuntimeError(f"Only {len(sample)} valid peak-luminosity draws.")
     low, high = np.percentile(sample, [16, 84])
-    ep_z = float(row["xp"] * (1.0 + REDSHIFT))
+    ep_z = float(row["xp"] * (1.0 + redshift))
     return {
         "Lpeak": (float(luminosity), max(float(luminosity - low), 0.0), max(float(high - luminosity), 0.0)),
         "Ep_peak": (
             ep_z,
-            float(row["xp_err_lo"] * (1.0 + REDSHIFT)),
-            float(row["xp_err_hi"] * (1.0 + REDSHIFT)),
+            float(row["xp_err_lo"] * (1.0 + redshift)),
+            float(row["xp_err_hi"] * (1.0 + redshift)),
         ),
         "t_peak": peak_time,
         "t_start": float(row["t_start"]),
@@ -996,7 +1124,7 @@ def yonetoku_frame(sample, catalog, pflx):
 def write_parameter_table(path, values, info, rank, n_sample):
     rows = []
     notes = {
-        "z": "Spectroscopic redshift used in the LAT and XRT analysis.",
+        "z": "Redshift used for the luminosity distance and the rest-frame peak energy.",
         "T90": "GBM bcat duration, 50-300 keV, the same quantity as FERMIGBRST t90.",
         "T05": (
             "Time between the 47.5% and 52.5% points of the 50-300 keV cumulative "
@@ -1129,8 +1257,8 @@ def _hist_value_text(key, value):
     return f"{value:.3g}"
 
 
-def _draw_histogram(ax, sample, value, xlabel, value_text, log=False, edges=None):
-    """Histogram of one property with the median and GRB 260924A marked."""
+def _draw_histogram(ax, sample, value, xlabel, value_text, star_label, log=False, edges=None):
+    """Histogram of one property with the median and the target burst marked."""
     sample = _finite_sample(sample, positive=log or edges is not None)
     if edges is None:
         edges = _log_edges(sample, value) if log else _linear_edges(sample, value)
@@ -1158,7 +1286,7 @@ def _draw_histogram(ax, sample, value, xlabel, value_text, log=False, edges=None
         place = f"{_ordinal(int(round(rank['percentile'])))} percentile\n{rank['n_above']:,} of {rank['n']:,} higher"
     ax.text(
         0.04 if on_left else 0.96, 0.96,
-        f"GRB 260924A\n{place}\n{value_text}",
+        f"{star_label}\n{place}\n{value_text}",
         transform=ax.transAxes, ha="left" if on_left else "right", va="top", fontsize=7.4,
         bbox={"boxstyle": "round,pad=0.28", "facecolor": "white", "edgecolor": "0.82", "alpha": 0.94},
         zorder=6,
@@ -1168,11 +1296,11 @@ def _draw_histogram(ax, sample, value, xlabel, value_text, log=False, edges=None
     return rank
 
 
-def _histogram_legend(fig):
+def _histogram_legend(fig, star_label):
     handles = [
         plt.Rectangle((0, 0), 1, 1, facecolor=POP_COLOR, edgecolor=POP_EDGE, linewidth=0.4, label="Long bursts"),
         plt.Line2D([0], [0], color="#4b5563", lw=0.9, ls="--", label="Median"),
-        plt.Line2D([0], [0], color="black", lw=1.15, marker="*", ms=9, label="GRB 260924A"),
+        plt.Line2D([0], [0], color="black", lw=1.15, marker="*", ms=9, label=star_label),
     ]
     fig.legend(
         handles=handles, loc="upper center", ncol=3, frameon=False, fontsize=8.5,
@@ -1192,8 +1320,8 @@ def _apply_plot_style():
     })
 
 
-def plot_property_histograms(output_dir, values, high_energy_csv=HIGH_ENERGY_CSV):
-    """Histograms of the long-burst population with GRB 260924A marked.
+def plot_property_histograms(output_dir, values, grb_name, high_energy_csv=HIGH_ENERGY_CSV):
+    """Histograms of the long-burst population with the target burst marked.
 
     Observed quantities use the Fermi-GBM catalog and the same T90 >= 2 s cut
     as the scatter plots. Redshift, isotropic energy, and rest-frame peak
@@ -1205,10 +1333,12 @@ def plot_property_histograms(output_dir, values, high_energy_csv=HIGH_ENERGY_CSV
     _apply_plot_style()
 
     sample = pd.read_csv(high_energy_csv)
+    sample = sample[sample["GRB"].map(_norm_name) != _norm_name(grb_name)].copy()
     sample["class"] = sample["type"].map(burst_class)
     long = sample[sample["class"] == "long"]
     catalog = gbm_science_frame(download_gbm_catalog(CACHE))
-    catalog = catalog[~(catalog["norm"].str.startswith("260924") | catalog["trigger_norm"].str.startswith("260924"))].copy()
+    catalog = catalog[~_burst_rows(catalog, grb_name)].copy()
+    star_label = f"GRB {_norm_name(grb_name)}"
     catalog["class"] = catalog["T90"].map(duration_class)
     gbm_long = catalog[catalog["class"] == "long"]
     luminosities = yonetoku_frame(sample, catalog, download_pflx_catalog(PFLX_CACHE))
@@ -1241,14 +1371,14 @@ def plot_property_histograms(output_dir, values, high_energy_csv=HIGH_ENERGY_CSV
                 value *= 1.0e52
             edges = _redshift_edges(series, value) if edges_key == "redshift" else None
             rank = _draw_histogram(
-                ax, series, value, xlabel, _hist_value_text(key, value),
+                ax, series, value, xlabel, _hist_value_text(key, value), star_label,
                 log=log, edges=edges,
             )
             rank["property"] = key
             ranks.append(rank)
             if index % ncols == 0:
                 ax.set_ylabel("Number of bursts")
-        _histogram_legend(fig)
+        _histogram_legend(fig, star_label)
         fig.suptitle(suptitle, fontsize=12, y=0.995)
         fig.subplots_adjust(left=0.07, right=0.985, bottom=0.09, top=0.86, hspace=0.42, wspace=0.28)
         fig.savefig(path, dpi=160)
@@ -1288,16 +1418,35 @@ def plot_property_histograms(output_dir, values, high_energy_csv=HIGH_ENERGY_CSV
     return table
 
 
-def plot_frail_relation(output_dir, eiso_1e52, eiso_err_lo=0.0, eiso_err_hi=0.0, theta_deg=THETA_J_DEG):
-    """E_iso versus jet angle for Frail et al. (2001), Table 1.
+def _log_errors(value, err):
+    """Asymmetric errors for a logarithmic axis.
 
-    A power law is fit to the measured bursts. GRB 260924A is placed at its
-    isotropic energy and the supplied jet angle.
+    The lower bar is omitted when the printed uncertainty reaches zero, so one
+    unconstrained point does not stretch the axis by orders of magnitude.
     """
-    table = pd.read_csv(FRAIL_TABLE, comment="#")
-    measured = table[table["theta_j"].notna() & table["theta_j_limit"].fillna("").isin(["", "~"])].copy()
-    lower = table[table["theta_j_limit"] == ">"].copy()
-    upper = table[table["theta_j_limit"] == "<"].copy()
+    value = np.asarray(value, float)
+    err = np.asarray(err, float)
+    err = np.where(np.isfinite(err) & (err > 0), err, 0.0)
+    lower = np.where(value > err, err, 0.0)
+    return [lower, err]
+
+
+def plot_frail_relation(output_dir, eiso_1e52, eiso_err_lo, eiso_err_hi, theta_deg, grb_label):
+    """E_iso versus jet angle for Frail et al. (2001) and Wang et al. (2018).
+
+    Frail et al. (2001) Table 1 gives the pre-Swift angles, in radians in that
+    file. Wang et al. (2018) Table 5 gives the jet-break sample, with angles
+    already in degrees. A power law is fit to every measured angle in the two
+    tables. Frail limits are drawn and left out of the fit. Bursts that appear
+    in both papers are drawn twice, once for each measurement. The target burst
+    is placed at its isotropic energy and the supplied jet angle.
+    """
+    frail = pd.read_csv(FRAIL_TABLE, comment="#")
+    measured = frail[frail["theta_j"].notna() & frail["theta_j_limit"].fillna("").isin(["", "~"])].copy()
+    lower = frail[frail["theta_j_limit"] == ">"].copy()
+    upper = frail[frail["theta_j_limit"] == "<"].copy()
+    wang = pd.read_csv(WANG_TABLE, comment="#")
+    wang = wang[wang["theta_j"].notna() & wang["E_gamma_iso"].notna()].copy()
 
     def degrees(frame):
         return np.degrees(frame["theta_j"].to_numpy(float))
@@ -1305,10 +1454,17 @@ def plot_frail_relation(output_dir, eiso_1e52, eiso_err_lo=0.0, eiso_err_hi=0.0,
     def erg(frame):
         return frame["E_iso"].to_numpy(float) * 1.0e51
 
+    frail_theta = degrees(measured)
+    frail_energy = erg(measured)
+    wang_theta = wang["theta_j"].to_numpy(float)
+    wang_energy = wang["E_gamma_iso"].to_numpy(float) * 1.0e52
+    wang_theta_err = _log_errors(wang_theta, wang["theta_j_err"].to_numpy(float))
+    wang_energy_err = _log_errors(wang_energy, wang["E_gamma_iso_err"].to_numpy(float) * 1.0e52)
+
     fig, ax = plt.subplots(figsize=(6.4, 4.7))
     ax.scatter(
-        degrees(measured), erg(measured), s=36, c=POP_COLOR, edgecolors=POP_EDGE,
-        linewidths=0.4, zorder=3, label="Frail et al. (2001)",
+        frail_theta, frail_energy, s=36, c=POP_COLOR, edgecolors=POP_EDGE,
+        linewidths=0.4, zorder=3, label=f"Frail et al. (2001) ({len(measured)})",
     )
     for frame, direction in ((lower, 1), (upper, -1)):
         for theta_value, energy in zip(degrees(frame), erg(frame)):
@@ -1322,16 +1478,30 @@ def plot_frail_relation(output_dir, eiso_1e52, eiso_err_lo=0.0, eiso_err_hi=0.0,
     if len(lower) or len(upper):
         ax.scatter([], [], s=36, facecolors="none", edgecolors=POP_EDGE, linewidths=0.9, label="Limit on " + r"$\theta_j$")
 
+    ax.errorbar(
+        wang_theta, wang_energy, xerr=wang_theta_err, yerr=wang_energy_err,
+        fmt="none", ecolor=WANG_EDGE, elinewidth=0.55, capsize=0, alpha=0.55, zorder=2,
+    )
+    ax.scatter(
+        wang_theta, wang_energy, s=28, marker="D", c=WANG_COLOR, edgecolors=WANG_EDGE,
+        linewidths=0.35, zorder=4, label=f"Wang et al. (2018) ({len(wang)})",
+    )
+
     eiso = eiso_1e52 * 1.0e52
     ax.errorbar(
         [theta_deg], [eiso], yerr=[[eiso_err_lo * 1.0e52], [eiso_err_hi * 1.0e52]],
         fmt="none", ecolor="black", elinewidth=0.8, capsize=2, zorder=5,
     )
-    ax.scatter([theta_deg], [eiso], s=220, marker="*", c="black", zorder=6, label="GRB 260924A")
+    ax.scatter([theta_deg], [eiso], s=220, marker="*", c="black", zorder=6, label=grb_label)
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    add_relation_fit(ax, degrees(measured), erg(measured), True, True)
+    add_relation_fit(
+        ax,
+        np.concatenate([frail_theta, wang_theta]),
+        np.concatenate([frail_energy, wang_energy]),
+        True, True,
+    )
     ax.set_xlabel(r"Jet opening angle $\theta_j$ (deg)")
     ax.set_ylabel(r"$E_{\mathrm{iso}}$ (erg)")
     _style_axes(ax)
@@ -1339,39 +1509,121 @@ def plot_frail_relation(output_dir, eiso_1e52, eiso_err_lo=0.0, eiso_err_hi=0.0,
     outfile = Path(output_dir) / "frail_relation.png"
     fig.savefig(outfile, dpi=160, bbox_inches="tight")
     plt.close(fig)
+    print(
+        f"Jet angles: {len(measured)} from Frail et al. (2001), "
+        f"{len(lower) + len(upper)} Frail limits, {len(wang)} from Wang et al. (2018) Table 5"
+    )
+    print(f"Wrote {outfile}")
+    return outfile
+
+
+def _beaming_factor(theta_deg):
+    """Fraction of the isotropic energy inside a jet of half-opening angle theta_deg."""
+    return 1.0 - np.cos(np.deg2rad(np.asarray(theta_deg, float)))
+
+
+def plot_ghirlanda_relation(
+    output_dir, eiso_1e52, eiso_err_lo, eiso_err_hi, ep_z, ep_err_lo, ep_err_hi, theta_deg, grb_label,
+):
+    """Rest-frame peak energy versus collimation-corrected energy.
+
+    This is the Ghirlanda relation. Wang et al. (2018) Table 5 supplies
+    E_gamma, and Table 2 of that paper supplies the redshift and the
+    observer-frame peak, with E_p,z = (1+z) E_p. Frail et al. (2001) Table 1
+    has no peak energy, so those bursts are not drawn. A power law is fit to
+    the Wang points. The target burst uses E_gamma = E_iso (1 - cos theta_j).
+    """
+    wang = pd.read_csv(WANG_TABLE, comment="#", dtype={"GRB": str})
+    keep = wang["E_gamma"].notna() & wang["Ep"].notna() & wang["z"].notna()
+    keep &= (wang["E_gamma"] > 0) & (wang["Ep"] > 0) & (wang["z"] > -1)
+    wang = wang[keep].copy()
+    energy = wang["E_gamma"].to_numpy(float) * 1.0e51
+    energy_err = _log_errors(energy, wang["E_gamma_err"].to_numpy(float) * 1.0e51)
+    redshift = 1.0 + wang["z"].to_numpy(float)
+    peak = wang["Ep"].to_numpy(float) * redshift
+    peak_err = _log_errors(peak, wang["Ep_err"].to_numpy(float) * redshift)
+
+    fig, ax = plt.subplots(figsize=(6.4, 4.7))
+    ax.errorbar(
+        energy, peak, xerr=energy_err, yerr=peak_err,
+        fmt="none", ecolor=WANG_EDGE, elinewidth=0.55, capsize=0, alpha=0.55, zorder=2,
+    )
+    ax.scatter(
+        energy, peak, s=28, marker="D", c=WANG_COLOR, edgecolors=WANG_EDGE,
+        linewidths=0.35, zorder=4, label=f"Wang et al. (2018) ({len(wang)})",
+    )
+
+    beaming = float(_beaming_factor(theta_deg))
+    this_energy = eiso_1e52 * 1.0e52 * beaming
+    ax.errorbar(
+        [this_energy], [ep_z],
+        xerr=[[eiso_err_lo * 1.0e52 * beaming], [eiso_err_hi * 1.0e52 * beaming]],
+        yerr=[[ep_err_lo], [ep_err_hi]],
+        fmt="none", ecolor="black", elinewidth=0.8, capsize=2, zorder=5,
+    )
+    ax.scatter([this_energy], [ep_z], s=220, marker="*", c="black", zorder=6, label=grb_label)
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    add_relation_fit(ax, energy, peak, True, True)
+    ax.set_xlabel(r"$E_{\gamma}$ (erg)")
+    ax.set_ylabel(r"$E_{\mathrm{p,z}}$ (keV)")
+    _style_axes(ax)
+    ax.legend(fontsize=7.5, frameon=True, framealpha=0.94, edgecolor="none", loc="center left", bbox_to_anchor=(1.02, 0.5))
+    outfile = Path(output_dir) / "ghirlanda_relation.png"
+    fig.savefig(outfile, dpi=160, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Ghirlanda relation: {len(wang)} jet-break measurements from Wang et al. (2018)")
     print(f"Wrote {outfile}")
     return outfile
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--grb", default=DEFAULT_GRB, help="GRB name, for example 260924A or 221009A. Default: 260924A.")
+    parser.add_argument("--redshift", type=float, default=None, help="Redshift. Taken from the high-energy compilation when omitted.")
+    parser.add_argument("--bcat", type=Path, default=None, help="GBM bcat FITS file. Default: data/GRB<name>/gbm/glg_bcat_all_*.fit.")
+    parser.add_argument("--band-csv", type=Path, default=None, help="Time-resolved Band fits. Default: results/GRB<name>/band_joint_gbm_bat_xrt.csv.")
+    parser.add_argument("--theta", type=float, default=None, help="Jet half-opening angle in degrees. Omit to skip the Frail and Ghirlanda panels.")
     parser.add_argument("--high-energy-csv", type=Path, default=HIGH_ENERGY_CSV)
-    parser.add_argument("--output-dir", type=Path, default=OUTPUT)
+    parser.add_argument("--output-dir", type=Path, default=None, help="Figure directory. Default: results/GRB<name>/population.")
     parser.add_argument("--refresh-catalog", action="store_true", help="Download the GBM catalog again instead of using the cache.")
     parser.add_argument("--draws", type=int, default=800, help="Monte Carlo draws for the derived uncertainties.")
     parser.add_argument(
         "--histograms-only", action="store_true",
-        help="Write the population histograms from grb260924a_parameters.csv and skip the scatter plots.",
+        help="Write the population histograms from the parameter table and skip the scatter plots.",
     )
     args = parser.parse_args()
+    target = resolve_target(args)
 
     if args.histograms_only:
-        table = pd.read_csv(args.output_dir / "grb260924a_parameters.csv")
+        table = pd.read_csv(target.output_dir / target.parameter_csv)
         values = {
             row.attribute: (float(row.value), float(row.err_lo), float(row.err_hi))
             for row in table.itertuples(index=False)
         }
-        plot_property_histograms(args.output_dir, values, args.high_energy_csv)
+        plot_property_histograms(target.output_dir, values, target.name, args.high_energy_csv)
         return
+
+    if target.bcat is None or not target.bcat.is_file():
+        raise SystemExit(
+            f"No GBM bcat for GRB {target.name} under data/GRB{target.name}/gbm/. Pass --bcat."
+        )
+    if not target.band.is_file():
+        raise SystemExit(
+            f"No Band table at {target.band}. Pass --band-csv."
+        )
 
     sample = pd.read_csv(args.high_energy_csv)
     sample["GRB"] = sample["GRB"].astype(str).str.strip()
+    redshift = resolve_redshift(args.redshift, target.name, sample)
+    sample = sample[sample["GRB"].map(_norm_name) != target.name].copy()
     top = top_energy_bursts(sample, N_TOP)
     print("Highest isotropic energies in the high-energy sample:")
     print(top[["GRB", "z", "T90", "Eiso", "Ep"]].to_string(index=False))
 
-    values, info = this_grb_parameters(BCAT, BAND_CSV, n_draws=args.draws)
-    peak = this_burst_peak_luminosity(n_draws=args.draws)
+    values, info = this_grb_parameters(target.bcat, target.band, redshift, n_draws=args.draws, seed=target.seed)
+    peak = this_burst_peak_luminosity(target.bcat, target.band, redshift, n_draws=args.draws, seed=target.seed)
     values["Lpeak"] = peak["Lpeak"]
     values["Ep_peak"] = peak["Ep_peak"]
     info["t_peak"] = peak["t_peak"]
@@ -1382,7 +1634,7 @@ def main():
     n_brighter = int((sample["Eiso"] > values["Eiso"][0]).sum())
     rank = n_brighter + 1
     print(
-        f"GRB {GRB_NAME}: z={values['z'][0]:.2f}, "
+        f"{target.label}: z={values['z'][0]:.2f}, "
         f"T90={values['T90'][0]:.1f} s, "
         f"T05={values['T05'][0]:.2f} s "
         f"(-{values['T05'][1]:.2f}/+{values['T05'][2]:.2f}, "
@@ -1402,10 +1654,10 @@ def main():
     )
 
     catalog = gbm_science_frame(download_gbm_catalog(CACHE, refresh=args.refresh_catalog))
-    background = catalog[~(catalog["norm"].str.startswith("260924") | catalog["trigger_norm"].str.startswith("260924"))].copy()
+    background = catalog[~_burst_rows(catalog, target.name)].copy()
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    write_parameter_table(args.output_dir / "grb260924a_parameters.csv", values, info, rank, n_with_this)
+    target.output_dir.mkdir(parents=True, exist_ok=True)
+    write_parameter_table(target.output_dir / target.parameter_csv, values, info, rank, n_with_this)
 
     plt.rcParams.update({
         "font.size": 10,
@@ -1428,8 +1680,8 @@ def main():
     high_background["class"] = high_background["type"].map(burst_class)
     # The plotting helper looks up T90_err optionally and z, Eiso, Ep by name.
     for x_key, y_key in itertools.combinations(HIGH_ENERGY_ATTRS, 2):
-        outfile = args.output_dir / f"high_energy_{x_key}_vs_{y_key}.png"
-        plot_pair(outfile, x_key, y_key, high_background, high_highlights, values, "High-energy GRBs")
+        outfile = target.output_dir / f"high_energy_{x_key}_vs_{y_key}.png"
+        plot_pair(outfile, x_key, y_key, high_background, high_highlights, values, "High-energy GRBs", target.label)
         print(f"Wrote {outfile}")
 
     gbm_highlights = []
@@ -1461,8 +1713,8 @@ def main():
     background["class"] = background["T90"].map(duration_class)
 
     for x_key, y_key in itertools.combinations(GBM_ATTRS, 2):
-        outfile = args.output_dir / f"gbm_{x_key}_vs_{y_key}.png"
-        plot_pair(outfile, x_key, y_key, background, gbm_highlights, values, "Fermi-GBM")
+        outfile = target.output_dir / f"gbm_{x_key}_vs_{y_key}.png"
+        plot_pair(outfile, x_key, y_key, background, gbm_highlights, values, "Fermi-GBM", target.label)
         print(f"Wrote {outfile}")
 
     pflx = download_pflx_catalog(PFLX_CACHE, refresh=args.refresh_catalog)
@@ -1490,13 +1742,22 @@ def main():
         })
     this_yonetoku = dict(values)
     this_yonetoku["Ep"] = values["Ep_peak"]
-    outfile = args.output_dir / "high_energy_Lpeak_vs_Ep.png"
-    plot_pair(outfile, "Ep", "Lpeak", yonetoku_background, yonetoku_highlights, this_yonetoku, "Redshift-known GBM GRBs")
+    outfile = target.output_dir / "high_energy_Lpeak_vs_Ep.png"
+    plot_pair(outfile, "Ep", "Lpeak", yonetoku_background, yonetoku_highlights, this_yonetoku, "Redshift-known GBM GRBs", target.label)
     print(f"Wrote {outfile}")
-    plot_frail_relation(
-        args.output_dir, values["Eiso"][0], values["Eiso"][1], values["Eiso"][2], THETA_J_DEG,
-    )
-    plot_property_histograms(args.output_dir, values, args.high_energy_csv)
+    if target.theta is None:
+        print(f"No jet angle for {target.label}. Pass --theta to draw the Frail and Ghirlanda panels.")
+    else:
+        plot_frail_relation(
+            target.output_dir, values["Eiso"][0], values["Eiso"][1], values["Eiso"][2], target.theta, target.label,
+        )
+        plot_ghirlanda_relation(
+            target.output_dir,
+            values["Eiso"][0], values["Eiso"][1], values["Eiso"][2],
+            values["Ep"][0], values["Ep"][1], values["Ep"][2],
+            target.theta, target.label,
+        )
+    plot_property_histograms(target.output_dir, values, target.name, args.high_energy_csv)
 
 
 if __name__ == "__main__":

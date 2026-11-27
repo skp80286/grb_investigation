@@ -216,3 +216,6 @@ data/
 .done
 roi10_*
 roi15_*
+/results
+/work
+/paper
